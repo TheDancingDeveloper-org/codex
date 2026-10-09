@@ -35,11 +35,7 @@ pub struct ClaudeCompatUserInstructionsProvider {
 impl ClaudeCompatUserInstructionsProvider {
     /// Creates a provider. `user_home` is the directory holding `.claude`; pass
     /// `None` when it cannot be determined and only the Codex home is loaded.
-    pub fn new(
-        codex_home: AbsolutePathBuf,
-        user_home: Option<PathBuf>,
-        max_bytes: usize,
-    ) -> Self {
+    pub fn new(codex_home: AbsolutePathBuf, user_home: Option<PathBuf>, max_bytes: usize) -> Self {
         Self {
             inner: CodexHomeUserInstructionsProvider::new(codex_home),
             user_home,
