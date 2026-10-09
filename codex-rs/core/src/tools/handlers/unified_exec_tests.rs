@@ -551,23 +551,83 @@ async fn exec_command_pre_tool_use_payload_uses_raw_command() {
     let (session, turn) = make_session_and_context().await;
     let turn = Arc::new(turn);
     let handler = ExecCommandHandler::default();
+    let step_context = StepContext::for_test(Arc::clone(&turn));
+    let turn_cwd = step_context
+        .environments
+        .local_environment_cwd()
+        .expect("local cwd")
+        .to_string_lossy()
+        .into_owned();
+    let invocation = ToolInvocation {
+        session: session.into(),
+        step_context,
+        turn,
+        cancellation_token: tokio_util::sync::CancellationToken::new(),
+        tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
+        call_id: "call-43".to_string(),
+        tool_name: codex_tools::ToolName::plain("exec_command"),
+        source: crate::tools::context::ToolCallSource::Direct,
+        payload,
+    };
 
     assert_eq!(
-        handler.pre_tool_use_payload(&ToolInvocation {
-            session: session.into(),
-            step_context: StepContext::for_test(Arc::clone(&turn)),
-            turn,
-            cancellation_token: tokio_util::sync::CancellationToken::new(),
-            tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
-            call_id: "call-43".to_string(),
-            tool_name: codex_tools::ToolName::plain("exec_command"),
-            source: crate::tools::context::ToolCallSource::Direct,
-            payload,
-        }),
+        handler.pre_tool_use_payload(&invocation),
         Some(crate::tools::registry::PreToolUsePayload {
             tool_name: HookToolName::bash(),
-            tool_input: serde_json::json!({ "command": "printf exec command" }),
+            tool_input: serde_json::json!({
+                "command": "printf exec command",
+                "workdir": turn_cwd,
+            }),
         })
+    );
+}
+
+#[tokio::test]
+async fn exec_command_pre_tool_use_payload_resolves_workdir() {
+    let payload = ToolPayload::Function {
+        arguments: serde_json::json!({
+            "cmd": "git checkout -- .",
+            "workdir": "/tmp/other-repo",
+        })
+        .to_string(),
+    };
+    let (session, turn) = make_session_and_context().await;
+    let turn = Arc::new(turn);
+    let handler = ExecCommandHandler::default();
+    let step_context = StepContext::for_test(Arc::clone(&turn));
+    let turn_cwd = step_context
+        .environments
+        .local_environment_cwd()
+        .expect("local cwd")
+        .to_string_lossy()
+        .into_owned();
+    let invocation = ToolInvocation {
+        session: session.into(),
+        step_context,
+        turn,
+        cancellation_token: tokio_util::sync::CancellationToken::new(),
+        tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
+        call_id: "call-43b".to_string(),
+        tool_name: codex_tools::ToolName::plain("exec_command"),
+        source: crate::tools::context::ToolCallSource::Direct,
+        payload,
+    };
+
+    let hook_payload = handler.pre_tool_use_payload(&invocation).expect("payload");
+    assert_eq!(hook_payload.tool_name, HookToolName::bash());
+    // The hook must see the directory the command runs in, not the turn cwd,
+    // so a guard can judge the tree the command actually touches.
+    assert_eq!(
+        hook_payload.tool_input["command"],
+        serde_json::json!("git checkout -- .")
+    );
+    assert_eq!(
+        hook_payload.tool_input["workdir"],
+        serde_json::json!("/tmp/other-repo")
+    );
+    assert_ne!(
+        hook_payload.tool_input["workdir"].as_str().unwrap(),
+        turn_cwd
     );
 }
 
