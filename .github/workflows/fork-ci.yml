@@ -67,6 +67,15 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # v8's build.rs otherwise downloads librusty_v8 from denoland, which does
+      # not publish the ptrcomp_sandbox profile this tree expects. This fetches
+      # the Codex-built artifacts from the upstream release and verifies them
+      # against the in-tree checksum manifest, the same as fork-release.
+      - name: Configure rusty_v8 artifact overrides and verify checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+
       # codex-voice-host is excluded: it is the only package pulling in GStreamer,
       # and it requires gstreamer-1.0 >= 1.28. Ubuntu 24.04 ships 1.24, so no
       # apt package satisfies it. Upstream never builds it with cargo either; it
