@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::function_tool::FunctionCallError;
 use codex_features::Feature;
 
@@ -157,8 +155,12 @@ impl CoreToolRuntime for WriteStdinHandler {
         }
         // The directory the shell was started in, not its current directory: a
         // `cd` typed into the shell is not tracked. Null when the process is gone.
-        let workdir = exec_process_start_cwd(invocation, args.session_id)
-            .map(serde_json::Value::String)
+        let workdir = invocation
+            .session
+            .services
+            .unified_exec_manager
+            .start_cwd_for_process(args.session_id)
+            .map(|cwd| serde_json::Value::String(cwd.to_string()))
             .unwrap_or(serde_json::Value::Null);
         Some(PreToolUsePayload {
             tool_name: HookToolName::bash(),
@@ -175,28 +177,4 @@ impl CoreToolRuntime for WriteStdinHandler {
         // `exec_command`; emit that command's matching Bash PostToolUse.
         post_unified_exec_tool_use_payload(invocation, result)
     }
-}
-
-/// The payload hook is synchronous, while the process store is behind an async
-/// lock. The caller runs on the session runtime, so the lookup is spawned there
-/// and reported back to this thread.
-fn exec_process_start_cwd(invocation: &ToolInvocation, process_id: i32) -> Option<String> {
-    let session = Arc::clone(&invocation.session);
-    let (tx, rx) = std::sync::mpsc::channel();
-    tokio::spawn(async move {
-        let cwd = session
-            .services
-            .unified_exec_manager
-            .start_cwd_for_process(process_id)
-            .await;
-        let _ = tx.send(cwd);
-    });
-    // Receiving on the runtime thread would deadlock the spawned lookup, so the
-    // wait happens on a worker thread and gives up rather than stalling the tool.
-    std::thread::spawn(move || rx.recv_timeout(std::time::Duration::from_secs(2)))
-        .join()
-        .ok()
-        .and_then(Result::ok)
-        .flatten()
-        .map(|cwd| cwd.to_string())
 }

@@ -722,8 +722,21 @@ async fn start_cwd_for_process_returns_the_spawn_directory() {
     );
 
     assert_eq!(
-        manager.start_cwd_for_process(process_id).await.as_ref(),
+        manager.start_cwd_for_process(process_id).as_ref(),
         Some(&cwd)
     );
-    assert_eq!(manager.start_cwd_for_process(process_id + 1).await, None);
+    assert_eq!(manager.start_cwd_for_process(process_id + 1), None);
+}
+
+#[tokio::test]
+async fn start_cwd_for_process_returns_none_without_blocking_while_locked() {
+    let manager = UnifiedExecProcessManager::default();
+    let _guard = manager.process_store.lock().await;
+
+    let started = Instant::now();
+    assert_eq!(manager.start_cwd_for_process(1), None);
+    assert!(
+        started.elapsed() < Duration::from_millis(200),
+        "lookup blocked on the held lock"
+    );
 }
