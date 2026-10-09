@@ -36,6 +36,9 @@ pub struct SpawnAgentOptions {
     pub environments: Option<TurnEnvironmentSnapshot>,
     pub multi_agent_v2_usage_hints: Option<ResolvedMultiAgentV2UsageHints>,
     pub cyber_access_program: Option<CyberAccessProgram>,
+    /// JSON schema the child's first turn must satisfy as its final output.
+    /// Plumbed into `TurnStartOptions::final_output_json_schema`; not re-validated here.
+    pub final_output_json_schema: Option<serde_json::Value>,
 }
 
 /// Identity and status observed from a loaded agent, without a handle to its runtime.
