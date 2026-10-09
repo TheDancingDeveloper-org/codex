@@ -4949,7 +4949,9 @@ async fn pre_tool_use_merges_hooks_json_and_config_toml() -> Result<()> {
                 "hook_event_name": hook_input["hook_event_name"],
                 "tool_name": hook_input["tool_name"],
                 "tool_use_id": hook_input["tool_use_id"],
-                "tool_input": hook_input["tool_input"],
+                "tool_input": {
+                    "command": hook_input["tool_input"]["command"],
+                },
             })
         })
         .collect::<Vec<_>>();
@@ -4964,7 +4966,9 @@ async fn pre_tool_use_merges_hooks_json_and_config_toml() -> Result<()> {
             "hook_event_name": hook_input["hook_event_name"],
             "tool_name": hook_input["tool_name"],
             "tool_use_id": hook_input["tool_use_id"],
-            "tool_input": hook_input["tool_input"],
+            "tool_input": {
+                "command": hook_input["tool_input"]["command"],
+            },
         })
     })
     .collect::<Vec<_>>();
