@@ -117,7 +117,8 @@ async fn home_prefix_resolves_against_the_given_home() {
     write(&home.path().join("shared.md"), "from home\n");
     write(&dir.path().join("CLAUDE.md"), "@~/shared.md\n");
 
-    let expansion = expand_imports(&dir.path().join("CLAUDE.md"), Some(home.path()), 1024, None).await;
+    let expansion =
+        expand_imports(&dir.path().join("CLAUDE.md"), Some(home.path()), 1024, None).await;
 
     assert_eq!(expansion.files[0].text, "from home");
 }
@@ -182,7 +183,10 @@ async fn imports_outside_the_allowed_roots_are_refused() {
         expansion.warnings
     );
     assert!(
-        expansion.warnings.iter().all(|warning| warning.contains("outside the allowed project roots")),
+        expansion
+            .warnings
+            .iter()
+            .all(|warning| warning.contains("outside the allowed project roots")),
         "unexpected warning: {:?}",
         expansion.warnings
     );
