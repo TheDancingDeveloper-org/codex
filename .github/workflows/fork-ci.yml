@@ -30,18 +30,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # linux-sandbox's build.rs links libcap through pkg-config. The voice and
-      # GStreamer crates (glib-sys, gstreamer-*-sys, gio-sys, gobject-sys) need
-      # the system libraries too, or `cargo check --workspace` fails in their
-      # build scripts. libasound2-dev matches what upstream rust-ci-full installs.
+      # linux-sandbox's build.rs links libcap through pkg-config.
       - name: Install build libraries
         working-directory: ${{ github.workspace }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libcap-dev pkg-config \
-            libglib2.0-dev libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev
 
       # Directory names are not package names (app-server-protocol is the
       # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
@@ -75,10 +67,12 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # A whole-workspace check, because a struct-field patch breaks dependents
-      # that a per-package test never compiles.
+      # codex-voice-host is excluded: it is the only package pulling in GStreamer,
+      # and it requires gstreamer-1.0 >= 1.28. Ubuntu 24.04 ships 1.24, so no
+      # apt package satisfies it. Upstream never builds it with cargo either; it
+      # builds //codex-rs/voice-host with Bazel against a bundled GStreamer.
       - name: cargo check
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets --exclude codex-voice-host
 
       - name: cargo fmt
         shell: bash
