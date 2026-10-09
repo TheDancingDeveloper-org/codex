@@ -64,8 +64,14 @@ pub async fn expand_imports(
     allowed_roots: Option<&[PathBuf]>,
 ) -> ImportExpansion {
     let mut expansion = ImportExpansion::default();
-    expand_with(&mut expansion, std::slice::from_ref(&path.to_path_buf()), home, budget, allowed_roots)
-        .await;
+    expand_with(
+        &mut expansion,
+        std::slice::from_ref(&path.to_path_buf()),
+        home,
+        budget,
+        allowed_roots,
+    )
+    .await;
     expansion
 }
 
@@ -178,8 +184,10 @@ impl Expander {
             Ok(path) => path,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return None,
             Err(err) => {
-                self.warnings
-                    .push(format!("Failed to read instructions from `{}`: {err}", path.display()));
+                self.warnings.push(format!(
+                    "Failed to read instructions from `{}`: {err}",
+                    path.display()
+                ));
                 return None;
             }
         };
