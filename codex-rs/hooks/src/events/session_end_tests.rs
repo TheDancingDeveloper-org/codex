@@ -67,6 +67,7 @@ fn handler(matcher: Option<&str>) -> ConfiguredHandler {
         timeout_sec: 2,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: test_path_buf("/tmp/hooks.json").abs().into(),
         source: HookSource::User,
         display_order: 0,

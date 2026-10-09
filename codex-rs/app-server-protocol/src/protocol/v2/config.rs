@@ -685,6 +685,10 @@ pub enum ConfiguredHookHandler {
         #[serde(rename = "additionalContextLimit")]
         #[ts(rename = "additionalContextLimit")]
         additional_context_limit: Option<usize>,
+        /// When true, a failure of this hook blocks the tool instead of failing open.
+        #[serde(default, rename = "failClosed")]
+        #[ts(rename = "failClosed")]
+        fail_closed: bool,
     },
     #[serde(rename = "mcp_tool")]
     #[ts(rename = "mcp_tool")]
