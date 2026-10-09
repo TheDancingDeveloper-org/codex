@@ -63,6 +63,17 @@ fn spawn_agent_tool_v2_requires_task_name() {
         Some("Reasoning effort override for the new agent. Omit to inherit the parent effort.")
     );
     assert!(!properties.contains_key("service_tier"));
+    // A caller-supplied schema is any JSON value, so the property carries no type.
+    let output_schema_arg = properties
+        .get("output_schema")
+        .expect("spawn_agent should accept an output schema");
+    assert_eq!(output_schema_arg.schema_type, None);
+    assert!(
+        output_schema_arg
+            .description
+            .as_deref()
+            .is_some_and(|description| description.contains("final output"))
+    );
     assert_eq!(
         parameters.required.as_ref(),
         Some(&vec!["task_name".to_string(), "message".to_string()])
