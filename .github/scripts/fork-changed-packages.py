@@ -20,7 +20,10 @@ dirs.sort(key=lambda entry: len(entry[0]), reverse=True)
 
 seen = []
 for argument in sys.argv[1:]:
-    path = os.path.normpath(argument.removeprefix("codex-rs/"))
+    path = os.path.normpath(argument)
+    prefix = "codex-rs" + os.sep
+    if path.startswith(prefix):
+        path = path[len(prefix):]
     for directory, name in dirs:
         if path == directory or path.startswith(directory + os.sep):
             if name not in seen:
