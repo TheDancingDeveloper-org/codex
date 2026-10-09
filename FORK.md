@@ -51,6 +51,12 @@ Record the new base tag and any dropped or reworked patch in the table below.
 |---|---|---|
 | — | none yet | — |
 
+## External adapters
+
+- ACP: the fork has no in-tree ACP server. Editors speak ACP through the
+  upstream `@agentclientprotocol/codex-acp` adapter, pointed at a fork release
+  binary with `CODEX_PATH`. Setup and what was verified: `docs/fork/acp.md`.
+
 ## Workflows
 
 Upstream workflows that need OpenAI-owned runners, BuildBuddy, signing, npm
