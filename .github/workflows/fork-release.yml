@@ -30,6 +30,10 @@ jobs:
             runner: ubuntu-24.04
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
+    # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
+    defaults:
+      run:
+        working-directory: codex-rs
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
         with:
@@ -45,6 +49,7 @@ jobs:
           use-cache: false
 
       - name: Install musl build tools
+        working-directory: ${{ github.workspace }}
         env:
           TARGET: ${{ matrix.target }}
         run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
@@ -87,8 +92,8 @@ jobs:
           # upstream tags are not fetched into this checkout.
           upstream_version="0.162.0"
           stamp="${upstream_version}+fork.${GITHUB_SHA:0:9}"
-          sed -i "0,/^version = \"0.0.0\"/s//version = \"${stamp}\"/" codex-rs/Cargo.toml
-          grep -m1 '^version' codex-rs/Cargo.toml
+          sed -i "0,/^version = \"0.0.0\"/s//version = \"${stamp}\"/" Cargo.toml
+          grep -m1 '^version' Cargo.toml
 
       - name: Build release binaries
         shell: bash
@@ -127,8 +132,8 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: |
-            dist/codex-${{ matrix.target }}.tar.gz
-            dist/SHA256SUMS-${{ matrix.target }}
+            codex-rs/dist/codex-${{ matrix.target }}.tar.gz
+            codex-rs/dist/SHA256SUMS-${{ matrix.target }}
 
   release:
     name: publish
