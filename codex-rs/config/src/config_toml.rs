@@ -336,6 +336,13 @@ pub struct ConfigToml {
     #[serde(default = "default_project_doc_fallback_filenames")]
     pub project_doc_fallback_filenames: Option<Vec<String>>,
 
+    /// Fork (WI-1131): also load the user's global Claude Code instructions
+    /// (`~/.claude/CLAUDE.md` and `~/.claude/rules/*.md`) into the user
+    /// instructions snapshot. Off by default, so upstream behaviour is unchanged
+    /// unless a config sets it.
+    #[serde(default)]
+    pub claude_compat_instructions: Option<bool>,
+
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,
 

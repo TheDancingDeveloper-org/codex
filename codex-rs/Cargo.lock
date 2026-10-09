@@ -3671,7 +3671,9 @@ version = "0.0.0"
 dependencies = [
  "codex-extension-api",
  "codex-utils-absolute-path",
+ "dirs",
  "pretty_assertions",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tracing",
