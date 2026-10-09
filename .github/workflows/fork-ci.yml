@@ -146,6 +146,13 @@ jobs:
           RUST_MIN_STACK: "8388608"
         run: |
           set -euo pipefail
+          # Tests resolve helper binaries in other packages through
+          # cargo_bin(), and `cargo test -p` never builds another package's
+          # bins, so CARGO_BIN_EXE_* is unset and the lookup in target/debug
+          # misses. Upstream's Bazel build declares them as data deps. Build
+          # every workspace bin once first. codex-voice-host is excluded
+          # because it needs GStreamer >= 1.28, which Ubuntu 24.04 lacks.
+          cargo build --workspace --bins --exclude codex-voice-host
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
             # packaged_daemon_bootstrap_seeds_local_package asserts
