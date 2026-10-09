@@ -223,8 +223,8 @@ jobs:
           # One changed line range per hunk, as "file start count" with the
           # codex-rs/ prefix stripped. A count of 0 is a pure deletion.
           git diff -U0 "$base"...HEAD -- codex-rs \
-            | awk '/^diff --git/{file=$4; sub("^b/codex-rs/","",file)}
-                   /^@@/{split($3,a,","); sub("^+","",a[1]); print file, a[1], (a[2] == "" ? 1 : a[2])}' \
+            | awk '/^diff --git/{file=$4; sub(/^b\/codex-rs\//, "", file)}
+                   /^@@/{split($3,a,","); sub(/^\+/, "", a[1]); print file, a[1], (a[2] == "" ? 1 : a[2])}' \
             > /tmp/changed-lines
           mapfile -t crates < <(printf '%s\n' "${{ steps.crates.outputs.list }}" | sed '/^$/d')
           (( ${#crates[@]} )) || exit 0
