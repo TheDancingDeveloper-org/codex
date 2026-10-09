@@ -1001,6 +1001,13 @@ class CommandConfiguredHookHandler(BaseModel):
     async_: Annotated[bool, Field(alias="async")]
     command: str
     command_windows: Annotated[str | None, Field(alias="commandWindows")] = None
+    fail_closed: Annotated[
+        bool | None,
+        Field(
+            alias="failClosed",
+            description="When true, a failure of this hook blocks the tool instead of failing open.",
+        ),
+    ] = False
     status_message: Annotated[str | None, Field(alias="statusMessage")] = None
     timeout_sec: Annotated[int | None, Field(alias="timeoutSec", ge=0)] = None
     type: Annotated[Literal["command"], Field(title="CommandConfiguredHookHandlerType")]
