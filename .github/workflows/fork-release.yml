@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   # aws-lc's jitter entropy path does not build on musl.
@@ -96,9 +96,12 @@ jobs:
           set -euo pipefail
           target="${{ matrix.target }}"
           cargo build --target "$target" --release --bin codex --bin codex-code-mode-host
-          for bin in codex codex-code-mode-host bwrap; do
+          for bin in codex codex-code-mode-host; do
             strip --strip-debug --strip-unneeded "target/${target}/release/${bin}"
           done
+          # bwrap was stripped before hashing so CODEX_BWRAP_SHA256 covers the
+          # exact bytes shipped. Stripping it again would change those bytes
+          # and invalidate the digest the codex binary embeds.
 
       - name: Package
         shell: bash
@@ -111,6 +114,13 @@ jobs:
             cp "target/${target}/release/${bin}" "$stage/${bin}"
           done
           (cd dist && sha256sum "${target}/codex" "${target}/codex-code-mode-host" "${target}/bwrap") > "dist/SHA256SUMS-${target}"
+          # The shipped bwrap must be byte-for-byte the one whose digest was
+          # embedded into the codex binary.
+          shipped="$(sha256sum "dist/${target}/bwrap" | awk '{print $1}')"
+          if [[ "$shipped" != "$CODEX_BWRAP_SHA256" ]]; then
+            echo "shipped bwrap ${shipped} != embedded CODEX_BWRAP_SHA256 ${CODEX_BWRAP_SHA256}" >&2
+            exit 1
+          fi
           tar -C dist -czf "dist/codex-${target}.tar.gz" "${target}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -124,6 +134,8 @@ jobs:
     name: publish
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -142,6 +154,7 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
