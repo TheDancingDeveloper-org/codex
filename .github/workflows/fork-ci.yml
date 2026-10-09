@@ -109,10 +109,13 @@ jobs:
             [[ -z "$crate" ]] && continue
             cargo clippy -p "$crate" --all-targets --message-format=json -- -W clippy::all \
               > "/tmp/clippy-${crate}.json" || true
-            # --slurpfile yields an array of strings. Iterating each element again
-            # (`[$changed[][]]`) is a jq runtime error, and jq exits 0 on those,
-            # so the gate would pass every PR. `any` compares strings directly,
-            # and jq's stderr is surfaced so a filter error fails the step.
+            # --slurpfile yields an array of strings. Iterating each element
+            # again (`[$changed[][]]`) is a jq runtime error, and jq exits 0 on
+            # those, so the gate would pass every PR. `any` compares strings
+            # directly. stderr goes to a file synchronously: a process
+            # substitution can still be writing when the check runs, which
+            # would let a jq error pass again.
+            rm -f /tmp/jq-err
             offenders="$(jq -r --slurpfile changed <(jq -R . /tmp/changed-files) '
               select(.reason == "compiler-message")
               | .message
@@ -121,8 +124,9 @@ jobs:
               | ($m.spans[] | select(.is_primary)) as $s
               | select(any($changed[]; . == $s.file_name))
               | "\($s.file_name):\($s.line_start):\($s.column_start): \($m.level): \($m.message)"
-            ' "/tmp/clippy-${crate}.json" 2> >(tee /tmp/jq-err >&2))"
+            ' "/tmp/clippy-${crate}.json" 2>/tmp/jq-err)"
             if [[ -s /tmp/jq-err ]]; then
+              cat /tmp/jq-err >&2
               echo "jq failed to read the clippy output" >&2
               exit 1
             fi
