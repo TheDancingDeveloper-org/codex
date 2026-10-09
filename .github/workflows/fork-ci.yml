@@ -139,6 +139,11 @@ jobs:
 
       - name: cargo test
         shell: bash
+        # codex-core's tests overflow the default thread stack (fatal runtime
+        # error: stack overflow). Upstream sets the same 8 MiB floor on its
+        # test step in rust-ci.yml.
+        env:
+          RUST_MIN_STACK: "8388608"
         run: |
           set -euo pipefail
           while IFS= read -r crate; do
