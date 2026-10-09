@@ -196,7 +196,11 @@ jobs:
             joined="$(printf '%s | ' "${known[@]}")"
             filter=(-E "not (${joined% | })")
           fi
+          # A failing crate must not hide the rest: the baseline needs every
+          # crate's result, and a PR should see all of its failures at once.
+          status=0
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
-            cargo nextest run -p "$crate" "${filter[@]}"
+            cargo nextest run -p "$crate" "${filter[@]}" || status=1
           done <<< "${{ steps.crates.outputs.list }}"
+          exit "$status"
