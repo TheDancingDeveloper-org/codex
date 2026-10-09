@@ -6211,6 +6211,11 @@
                 "null"
               ]
             },
+            "failClosed": {
+              "default": false,
+              "description": "When true, a failure of this hook blocks the tool instead of failing open.",
+              "type": "boolean"
+            },
             "statusMessage": {
               "type": [
                 "string",
