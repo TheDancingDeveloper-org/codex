@@ -520,7 +520,13 @@ impl CoreToolRuntime for ExecCommandHandler {
             .ok()
             .map(|args| PreToolUsePayload {
                 tool_name: HookToolName::bash(),
-                tool_input: serde_json::json!({ "command": args.cmd }),
+                tool_input: serde_json::json!({
+                    "command": args.cmd,
+                    // The resolved directory the command actually runs in. The hook
+                    // payload's `cwd` is the turn's cwd, which differs whenever the
+                    // tool call sets `workdir`.
+                    "workdir": resolved_hook_workdir(invocation, arguments),
+                }),
             })
     }
 
@@ -551,6 +557,53 @@ impl CoreToolRuntime for ExecCommandHandler {
         result: &dyn crate::tools::context::ToolOutput,
     ) -> Option<PostToolUsePayload> {
         post_unified_exec_tool_use_payload(invocation, result)
+    }
+}
+
+/// Absolute path the command will run in: `workdir` resolved against the
+/// selected environment's cwd, or that cwd itself when `workdir` is absent.
+/// Falls back to the turn's local environment cwd when resolution fails.
+fn resolved_hook_workdir(invocation: &ToolInvocation, arguments: &str) -> String {
+    let fallback = || {
+        invocation
+            .step_context
+            .environments
+            .local_environment_cwd()
+            .map(|cwd| cwd.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    #[derive(serde::Deserialize)]
+    struct HookWorkdirArgs {
+        #[serde(default)]
+        environment_id: Option<String>,
+        #[serde(default)]
+        workdir: Option<String>,
+    }
+    let hook_args: HookWorkdirArgs = match parse_arguments(arguments) {
+        Ok(args) => args,
+        Err(_) => return fallback(),
+    };
+    let Ok(environment) = resolve_tool_environment(
+        &invocation.step_context,
+        hook_args.environment_id.as_deref(),
+        "unified exec is unavailable in this session",
+    ) else {
+        return fallback();
+    };
+    let cwd = hook_args
+        .workdir
+        .as_deref()
+        .filter(|workdir| !workdir.is_empty())
+        .map_or_else(
+            || Ok(environment.cwd().clone()),
+            |workdir| environment.cwd().join(workdir),
+        );
+    match cwd {
+        Ok(cwd) => cwd
+            .to_abs_path()
+            .map(|cwd| cwd.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| fallback()),
+        Err(_) => fallback(),
     }
 }
 
