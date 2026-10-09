@@ -92,8 +92,17 @@ jobs:
           # upstream tags are not fetched into this checkout.
           upstream_version="0.162.0"
           stamp="${upstream_version}+fork.${GITHUB_SHA:0:9}"
-          sed -i "0,/^version = \"0.0.0\"/s//version = \"${stamp}\"/" Cargo.toml
-          grep -m1 '^version' Cargo.toml
+          # The workspace version is the upstream version (WI-1127), so match that
+          # line. Matching a literal 0.0.0 matched nothing and the stamp was
+          # silently dropped, which is why `codex --version` printed 0.162.0.
+          current="$(grep -m1 '^version = "' Cargo.toml | sed 's/version = "//;s/"//')"
+          sed -i "0,/^version = \"${current}\"/s//version = \"${stamp}\"/" Cargo.toml
+          stamped="$(grep -m1 '^version = "' Cargo.toml)"
+          echo "$stamped"
+          case "$stamped" in
+            *"+fork."*) ;;
+            *) echo "version stamp did not land" >&2; exit 1 ;;
+          esac
 
       - name: Build release binaries
         shell: bash
