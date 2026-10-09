@@ -4269,6 +4269,20 @@
           },
           "type": "array"
         },
+        "extra_project_roots": {
+          "description": "Fork (WI-1133): extra project skill roots, relative to each directory between the project root and the working directory.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "extra_user_roots": {
+          "description": "Fork (WI-1133): extra user skill roots, relative to the user config directory. The built-in roots are always loaded; these are added.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "include_instructions": {
           "description": "Whether turns receive the automatic skills instructions block.",
           "type": "boolean"
