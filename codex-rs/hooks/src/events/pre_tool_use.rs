@@ -294,9 +294,7 @@ fn parse_completed(
 
     // `failClosed` turns every failure into a block the model sees. A handler
     // without the flag keeps failing open, so the tool still runs.
-    if handler.fail_closed
-        && handler.can_apply_control_effects()
-        && status == HookRunStatus::Failed
+    if handler.fail_closed && handler.can_apply_control_effects() && status == HookRunStatus::Failed
     {
         status = HookRunStatus::Blocked;
         should_block = true;
@@ -352,8 +350,8 @@ mod tests {
 
     use super::PreToolUseHandlerData;
     use super::command_input_json;
-    use super::latest_updated_input;
     use super::dispatcher;
+    use super::latest_updated_input;
     use super::parse_completed;
     use super::preview;
     use crate::engine::ConfiguredHandler;
@@ -905,11 +903,7 @@ mod tests {
     fn fail_closed_blocks_timeout() {
         let mut handler = handler();
         handler.fail_closed = true;
-        let parsed = parse_completed(
-            &handler,
-            run_result_error("hook timed out after 5s"),
-            None,
-        );
+        let parsed = parse_completed(&handler, run_result_error("hook timed out after 5s"), None);
         assert_failed_closed(&parsed, "timed out");
     }
 

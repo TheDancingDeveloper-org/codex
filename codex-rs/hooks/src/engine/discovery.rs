@@ -1534,7 +1534,9 @@ mod tests {
         assert!(handlers[0].fail_closed);
         assert_eq!(handlers[0].execution_mode(), HookExecutionMode::Sync);
         assert!(
-            warnings.iter().any(|warning| warning.contains("failClosed")),
+            warnings
+                .iter()
+                .any(|warning| warning.contains("failClosed")),
             "expected a warning about the async/failClosed combination, got {warnings:?}"
         );
     }
