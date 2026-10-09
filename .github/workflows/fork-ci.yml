@@ -57,13 +57,15 @@ jobs:
       # every package.
       - name: Packages changed against fork/main
         id: crates
+        env:
+          FORCED_PACKAGES: ${{ inputs.packages }}
         shell: bash
         run: |
           set -euo pipefail
           base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
           mapfile -t files < <(git diff --name-only "$base"...HEAD)
-          if [[ -n "${{ inputs.packages }}" ]]; then
-            mapfile -t packages < <(echo "${{ inputs.packages }}" | tr ',' '\n')
+          if [[ -n "$FORCED_PACKAGES" ]]; then
+            mapfile -t packages < <(echo "$FORCED_PACKAGES" | tr ',' '\n')
             echo "forced: ${packages[*]}"
             {
               echo "list<<EOF"
@@ -178,22 +180,23 @@ jobs:
           # every workspace bin once first. codex-voice-host is excluded
           # because it needs GStreamer >= 1.28, which Ubuntu 24.04 lacks.
           cargo build --workspace --bins --exclude codex-voice-host
-          # Known failures are tests that fail on unmodified fork/main. Each
-          # line of the file is a nextest filterset with a `#` reason citing
-          # the baseline run that showed it failing. Nothing is listed without
-          # that evidence.
+          # nextest UNIONS multiple -E filtersets, so one `not` per line would
+          # re-include every excluded test as soon as the file has two lines.
+          # Build a single disjunction and omit -E entirely when nothing is
+          # listed.
           known=()
           while IFS= read -r line; do
             line="${line%%#*}"
             line="${line#"${line%%[![:space:]]*}"}"
             [[ -z "$line" ]] && continue
-            known+=("$line")
+            known+=("(${line})")
           done < "${GITHUB_WORKSPACE}/.github/fork-ci-known-failures.txt"
+          filter=()
+          if (( ${#known[@]} > 0 )); then
+            joined="$(printf '%s | ' "${known[@]}")"
+            filter=(-E "not (${joined% | })")
+          fi
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
-            filter=()
-            for expr in "${known[@]}"; do
-              filter+=(-E "not (${expr})")
-            done
             cargo nextest run -p "$crate" "${filter[@]}"
           done <<< "${{ steps.crates.outputs.list }}"
