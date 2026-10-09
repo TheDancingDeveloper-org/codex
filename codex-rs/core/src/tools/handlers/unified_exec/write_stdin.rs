@@ -9,6 +9,7 @@ use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
+use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::sandboxing::ToolError;
 use crate::unified_exec::UnifiedExecContext;
@@ -141,11 +142,21 @@ impl CoreToolRuntime for WriteStdinHandler {
         matches!(payload, ToolPayload::Function { .. })
     }
 
-    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
-        // `write_stdin` is transport for an existing exec session. Empty writes
-        // are background polls, and non-empty writes continue a command that
-        // already ran PreToolUse as Bash, so do not emit a second pre hook here.
-        None
+    fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        let ToolPayload::Function { arguments } = &invocation.payload else {
+            return None;
+        };
+        // Empty writes are background polls and carry nothing to review. A
+        // non-empty write is text the model is typing into the open shell, so
+        // review it as a Bash command before it reaches the process.
+        let args = parse_arguments::<WriteStdinArgs>(arguments).ok()?;
+        if args.chars.is_empty() {
+            return None;
+        }
+        Some(PreToolUsePayload {
+            tool_name: HookToolName::bash(),
+            tool_input: serde_json::json!({ "command": args.chars }),
+        })
     }
 
     fn post_tool_use_payload(

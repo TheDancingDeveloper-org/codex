@@ -77,6 +77,7 @@ struct NormalizedHandler {
     timeout_sec: u64,
     status_message: Option<String>,
     additional_context_limit: Option<usize>,
+    fail_closed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -511,6 +512,7 @@ fn append_matcher_groups(
                     r#async,
                     status_message,
                     additional_context_limit,
+                    fail_closed,
                 } => {
                     let command = if cfg!(windows) {
                         command_windows.unwrap_or(command)
@@ -565,6 +567,7 @@ fn append_matcher_groups(
                         r#async,
                         status_message: status_message.clone(),
                         additional_context_limit: normalized_additional_context_limit,
+                        fail_closed,
                     };
                     let command = source.env.iter().fold(command, |command, (key, value)| {
                         command.replace(&format!("${{{key}}}"), value)
@@ -579,6 +582,7 @@ fn append_matcher_groups(
                         timeout_sec,
                         status_message,
                         additional_context_limit,
+                        fail_closed,
                     }
                 }
                 HookHandlerConfig::McpTool {
@@ -632,6 +636,7 @@ fn append_matcher_groups(
                         timeout_sec,
                         status_message,
                         additional_context_limit: None,
+                        fail_closed: false,
                     }
                 }
                 HookHandlerConfig::Prompt {} => {
@@ -662,6 +667,7 @@ fn append_matcher_groups(
                 timeout_sec,
                 status_message,
                 additional_context_limit,
+                fail_closed,
             } = normalized;
             let current_hash = hook_hash(event_name, matcher, &group, &config);
             let key = crate::hook_key(&source.key_source, event_name, group_index, handler_index);
@@ -728,6 +734,7 @@ fn append_matcher_groups(
                     additional_context_limit: AdditionalContextLimit::from_config(
                         additional_context_limit,
                     ),
+                    fail_closed,
                     source_path: source.path.clone().into(),
                     source: source.source,
                     display_order: *display_order,
@@ -979,6 +986,7 @@ mod tests {
                 r#async: false,
                 status_message: None,
                 additional_context_limit: None,
+                fail_closed: false,
             }],
         }
     }
@@ -995,6 +1003,7 @@ mod tests {
                 r#async: false,
                 status_message: None,
                 additional_context_limit: Some(additional_context_limit),
+                fail_closed: false,
             }],
         }
     }
@@ -1263,6 +1272,7 @@ mod tests {
                 timeout_sec: 600,
                 status_message: None,
                 additional_context_limit: Default::default(),
+                fail_closed: false,
                 source_path: source_path.clone().into(),
                 source: hook_source(),
                 display_order: 0,
@@ -1303,6 +1313,7 @@ mod tests {
                 timeout_sec: 600,
                 status_message: None,
                 additional_context_limit: Default::default(),
+                fail_closed: false,
                 source_path: source_path.clone().into(),
                 source: hook_source(),
                 display_order: 0,
@@ -1341,6 +1352,7 @@ mod tests {
                         r#async: false,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     },
                     HookHandlerConfig::Command {
                         command: "echo clamped".to_string(),
@@ -1349,6 +1361,7 @@ mod tests {
                         r#async: true,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     },
                 ],
             }],
@@ -1431,6 +1444,7 @@ mod tests {
                     r#async: true,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
         );
@@ -1621,6 +1635,7 @@ mod tests {
                         r#async: false,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     }],
                 }],
                 ..Default::default()
@@ -1652,6 +1667,7 @@ mod tests {
                     r#async: false,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
         );
