@@ -88,7 +88,7 @@ use codex_extension_api::TurnStartAdmission;
 use codex_features::Feature;
 use codex_feedback::CodexFeedback;
 use codex_goal_extension::GoalService;
-use codex_home::CodexHomeUserInstructionsProvider;
+use codex_home::user_instructions_provider;
 use codex_login::AuthManager;
 use codex_models_manager::manager::ModelCatalogSettings;
 use codex_otel::auth_storage::AuthStorageOriginator;
@@ -406,9 +406,11 @@ impl MessageProcessor {
                         turn_start_admission: Some(Arc::clone(&turn_start_admission)),
                     },
                 ),
-                Arc::new(CodexHomeUserInstructionsProvider::new(
+                user_instructions_provider(
                     config.codex_home.clone(),
-                )),
+                    config.claude_compat_instructions,
+                    config.project_doc_max_bytes,
+                ),
                 Some(analytics_events_client.clone()),
                 codex_core::passthrough_image_store(),
                 Arc::clone(&thread_store),

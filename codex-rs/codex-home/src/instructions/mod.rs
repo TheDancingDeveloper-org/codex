@@ -12,6 +12,18 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 const DEFAULT_AGENTS_MD_FILENAME: &str = "AGENTS.md";
 const LOCAL_AGENTS_MD_FILENAME: &str = "AGENTS.override.md";
 
+// Fork (WI-1131): Claude Code global instructions and the shared @import
+// expander. `imports` is public so the per-directory loader (WI-1132) reuses it.
+pub mod claude_compat;
+pub mod imports;
+
+#[cfg(test)]
+pub(crate) use claude_compat::ClaudeCompatUserInstructionsProvider;
+#[cfg(test)]
+pub(crate) use imports::MAX_IMPORT_DEPTH;
+#[cfg(test)]
+pub(crate) use imports::expand_imports;
+
 /// Loads user instructions from a Codex home directory.
 #[derive(Clone, Debug)]
 pub struct CodexHomeUserInstructionsProvider {
@@ -111,3 +123,9 @@ impl UserInstructionsProvider for CodexHomeUserInstructionsProvider {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod imports_tests;
+
+#[cfg(test)]
+mod claude_compat_tests;
