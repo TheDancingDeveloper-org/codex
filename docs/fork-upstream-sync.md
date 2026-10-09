@@ -20,8 +20,21 @@ stable tag, whichever comes first.
    anything that drifted.
 6. Update `upstream_version` in `.github/workflows/fork-release.yml` and the
    base tag recorded in `FORK.md`, and update the carried-patch table.
-7. Fast-forward `fork/main` and push. The `fork-release` workflow then
-   publishes a release tagged with the new commit SHA.
+7. Move `fork/main` to the result with
+   `git push --force-with-lease=refs/heads/fork/main:<expected-old-sha>`.
+   A rebase onto a new tag is **not a fast-forward**, so a plain push is
+   rejected and a plain `--force` is never used: `--force-with-lease` refuses
+   to overwrite the branch if someone else has moved it since you last saw it.
+8. The `fork-release` workflow then publishes a GitHub release tagged with the
+   new commit SHA.
+
+## Release tags stay reachable
+
+The Vogt engine pins `fork/main` by commit SHA and installs the release tagged
+with that SHA. Once a release is published its tag must keep pointing at the
+commit it was built from, and that commit must stay reachable — never delete a
+release tag and never garbage-collect its commit. Moving `fork/main` does not
+move a tag, so older releases keep working after every rebase.
 
 ## Watching upstream
 
