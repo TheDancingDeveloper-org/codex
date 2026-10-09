@@ -45,10 +45,23 @@ jobs:
           tool: nextest
           version: 0.9.103
 
-      # linux-sandbox's build.rs links libcap through pkg-config.
+      # linux-sandbox's build.rs links libcap through pkg-config. bubblewrap is
+      # what the sandbox tests actually run.
       - name: Install build libraries
         working-directory: ${{ github.workspace }}
         run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
+
+      # Ubuntu 24.04's AppArmor user-namespace restriction blocks bwrap, so
+      # every sandbox test fails without this. Copied from
+      # .github/actions/setup-ci/action.yml, which upstream's Linux nextest
+      # jobs run before testing.
+      - name: Allow unprivileged user namespaces
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       # Directory names are not package names (app-server-protocol is the
       # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
