@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
           mapfile -t crates < <(git diff --name-only "$base"...HEAD \
-            | awk -F/ '/^codex-rs\/[^/]+\/src\//{print $2}' | sort -u)
+            | awk -F/ '/^codex-rs\/[^/]+\/.+/{print $2}' | sort -u)
           echo "changed: ${crates[*]:-none}"
           {
             echo "list<<EOF"
