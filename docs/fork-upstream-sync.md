@@ -25,16 +25,17 @@ stable tag, whichever comes first.
    A rebase onto a new tag is **not a fast-forward**, so a plain push is
    rejected and a plain `--force` is never used: `--force-with-lease` refuses
    to overwrite the branch if someone else has moved it since you last saw it.
-8. The `fork-release` workflow then publishes a GitHub release tagged with the
-   new commit SHA.
+8. The `fork-release` workflow then publishes a GitHub release tagged
+   `fork-<full sha>`. A bare 40-hex SHA is not a valid tag name, which is why
+   the tag carries the prefix.
 
 ## Release tags stay reachable
 
 The Vogt engine pins `fork/main` by commit SHA and installs the release tagged
-with that SHA. Once a release is published its tag must keep pointing at the
-commit it was built from, and that commit must stay reachable — never delete a
-release tag and never garbage-collect its commit. Moving `fork/main` does not
-move a tag, so older releases keep working after every rebase.
+`fork-<sha>` (WI-1142). Once a release is published its tag must keep pointing
+at the commit it was built from, and that commit must stay reachable — never
+delete a release tag and never garbage-collect its commit. Moving `fork/main`
+does not move a tag, so older releases keep working after every rebase.
 
 ## Watching upstream
 

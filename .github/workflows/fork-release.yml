@@ -154,8 +154,9 @@ jobs:
           cat release/SHA256SUMS-* | sort > release/SHA256SUMS
           rm release/SHA256SUMS-*
 
-      # The release tag is the full fork commit SHA, so the Vogt engine can
-      # install exactly the commit it pins.
+      # The release tag is `fork-<full sha>`. A bare 40-hex SHA is rejected as a
+      # tag name (HTTP 422), which is what the first publish attempts hit. The
+      # Vogt engine installs by this tag (WI-1142).
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -163,11 +164,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_SHA" >/dev/null 2>&1; then
-            echo "release ${GITHUB_SHA} already exists"
+          tag="fork-${GITHUB_SHA}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release ${tag} already exists"
             exit 0
           fi
-          gh release create "$GITHUB_SHA" release/* \
+          gh release create "$tag" release/* \
             --target "$GITHUB_SHA" \
             --title "fork ${GITHUB_SHA:0:9}" \
             --notes "Fork build of ${GITHUB_SHA}. Static musl binaries for x86_64 and aarch64; verify with SHA256SUMS."
