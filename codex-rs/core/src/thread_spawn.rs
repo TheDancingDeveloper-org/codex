@@ -45,6 +45,8 @@ pub(crate) struct ThreadSpawnRequest {
     pub agent_type: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    /// JSON schema the child's first turn must satisfy as its final output.
+    pub output_schema: Option<serde_json::Value>,
 }
 
 impl ThreadSpawnRequest {
@@ -100,6 +102,7 @@ pub(crate) async fn spawn(
     call_id: &str,
     request: ThreadSpawnRequest,
 ) -> Result<ThreadSpawnResult, ThreadSpawnError> {
+    let output_schema = request.output_schema.clone();
     let (request, message) = request.into_parts()?;
     let (settings, task_name) = prepare(session, step_context, call_id, request).await?;
     let request = SpawnRequest {
@@ -110,7 +113,10 @@ pub(crate) async fn spawn(
             mode: MessageDeliveryMode::TriggerTurn,
         },
         source: settings.source,
-        options: settings.options,
+        options: SpawnAgentOptions {
+            final_output_json_schema: output_schema,
+            ..settings.options
+        },
     };
     let (agent, config) = session.services.agent_control.spawn(request).await?;
     Ok(ThreadSpawnResult {

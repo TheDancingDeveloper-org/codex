@@ -132,6 +132,7 @@ async fn handle_spawn_agent(
             agent_type: args.agent_type.clone(),
             model: args.model,
             reasoning_effort: args.reasoning_effort,
+            output_schema: args.output_schema,
         },
     )
     .await
@@ -208,6 +209,9 @@ struct SpawnAgentArgs {
     reasoning_effort: Option<ReasoningEffort>,
     fork_turns: Option<String>,
     fork_context: Option<bool>,
+    /// JSON schema the child's first turn must satisfy as its final output.
+    #[serde(default)]
+    output_schema: Option<serde_json::Value>,
 }
 
 impl SpawnAgentArgs {
