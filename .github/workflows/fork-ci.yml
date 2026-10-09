@@ -30,10 +30,18 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # linux-sandbox's build.rs links libcap through pkg-config.
+      # linux-sandbox's build.rs links libcap through pkg-config. The voice and
+      # GStreamer crates (glib-sys, gstreamer-*-sys, gio-sys, gobject-sys) need
+      # the system libraries too, or `cargo check --workspace` fails in their
+      # build scripts. libasound2-dev matches what upstream rust-ci-full installs.
       - name: Install build libraries
         working-directory: ${{ github.workspace }}
-        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcap-dev pkg-config \
+            libglib2.0-dev libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev libasound2-dev
 
       # Directory names are not package names (app-server-protocol is the
       # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
