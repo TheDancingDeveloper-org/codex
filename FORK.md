@@ -40,7 +40,8 @@ a tag ships:
    publish the release. A rebase onto a new tag is not a fast-forward, and a
    plain `--force` is never used. The procedure itself, including why each
    published release tag must stay reachable, is the runbook at
-   `docs/fork-upstream-sync.md`.
+   `docs/fork-upstream-sync.md`. The release it publishes is tagged
+   `fork-<full sha>`, not the bare SHA.
 
 Record the new base tag and any dropped or reworked patch in the table below.
 
