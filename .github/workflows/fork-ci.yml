@@ -95,34 +95,40 @@ jobs:
             cargo fmt -p "$crate" -- --check
           done <<< "${{ steps.crates.outputs.list }}"
 
-      # -D warnings would fail the PR on upstream lint debt in files it never
+      # -D warnings would fail the PR on upstream lint debt in lines it never
       # touched, and a fork patch must not have to fix that. Clippy runs without
-      # it, and only a warning or error whose primary span is in a file this PR
-      # changed fails the build. Compile errors are fatal regardless, which
+      # it, and only a warning or error whose primary span overlaps a hunk this
+      # PR changed fails the build. Compile errors are fatal regardless, which
       # `cargo check` above already enforces.
       - name: cargo clippy
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s\n' "${{ steps.crates.outputs.files }}" | sed 's|^codex-rs/||' > /tmp/changed-files
+          base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
+          # One changed line range per hunk, as "file start count" with the
+          # codex-rs/ prefix stripped. A count of 0 is a pure deletion.
+          git diff -U0 "$base"...HEAD -- codex-rs \
+            | awk '/^diff --git/{file=$4; sub("^b/codex-rs/","",file)}
+                   /^@@/{split($3,a,","); sub("^+","",a[1]); print file, a[1], (a[2] == "" ? 1 : a[2])}' \
+            > /tmp/changed-lines
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
             cargo clippy -p "$crate" --all-targets --message-format=json -- -W clippy::all \
               > "/tmp/clippy-${crate}.json" || true
-            # --slurpfile yields an array of strings. Iterating each element
-            # again (`[$changed[][]]`) is a jq runtime error, and jq exits 0 on
-            # those, so the gate would pass every PR. `any` compares strings
-            # directly. stderr goes to a file synchronously: a process
-            # substitution can still be writing when the check runs, which
-            # would let a jq error pass again.
+            # stderr goes to a file synchronously. jq exits 0 on a runtime
+            # error, so without this check a broken filter would pass the gate.
             rm -f /tmp/jq-err
-            offenders="$(jq -r --slurpfile changed <(jq -R . /tmp/changed-files) '
+            offenders="$(jq -r --slurpfile lines <(jq -R 'split(" ") | {file:.[0], start:.[1]|tonumber, count:.[2]|tonumber}' /tmp/changed-lines) '
               select(.reason == "compiler-message")
               | .message
               | select(.level == "warning" or .level == "error")
               | . as $m
               | ($m.spans[] | select(.is_primary)) as $s
-              | select(any($changed[]; . == $s.file_name))
+              | select(any($lines[];
+                  .file == $s.file_name
+                  and .count > 0
+                  and $s.line_start <= (.start + .count - 1)
+                  and $s.line_end >= .start))
               | "\($s.file_name):\($s.line_start):\($s.column_start): \($m.level): \($m.message)"
             ' "/tmp/clippy-${crate}.json" 2>/tmp/jq-err)"
             if [[ -s /tmp/jq-err ]]; then
@@ -132,7 +138,7 @@ jobs:
             fi
             if [[ -n "$offenders" ]]; then
               echo "$offenders"
-              echo "clippy findings in files this PR changes" >&2
+              echo "clippy findings in lines this PR changes" >&2
               exit 1
             fi
           done <<< "${{ steps.crates.outputs.list }}"
