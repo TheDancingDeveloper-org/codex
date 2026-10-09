@@ -134,6 +134,7 @@ async fn handle_spawn_agent(
                 environments: Some(step_context.environments.clone()),
                 multi_agent_v2_usage_hints: None,
                 cyber_access_program: turn.cyber_access_program,
+                final_output_json_schema: args.output_schema,
             },
         })
         .await
@@ -224,6 +225,9 @@ struct SpawnAgentArgs {
     reasoning_effort: Option<ReasoningEffort>,
     #[serde(default)]
     fork_context: bool,
+    /// JSON schema the child's first turn must satisfy as its final output.
+    #[serde(default)]
+    output_schema: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
