@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: [fork/main]
   workflow_dispatch:
+    inputs:
+      # Comma-separated package names to check instead of the diff. Used to
+      # measure the baseline on unmodified fork/main, which has no diff.
+      packages:
+        description: Packages to check, overriding the diff
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -30,10 +37,18 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Same pin upstream uses in rust-ci-full-nextest-platform.yml, so
+      # codex-rs/.config/nextest.toml (serialized test groups, retries, slow
+      # timeouts) applies to the fork's tests too.
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+
       # linux-sandbox's build.rs links libcap through pkg-config.
       - name: Install build libraries
         working-directory: ${{ github.workspace }}
-        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
 
       # Directory names are not package names (app-server-protocol is the
       # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
@@ -47,6 +62,16 @@ jobs:
           set -euo pipefail
           base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
           mapfile -t files < <(git diff --name-only "$base"...HEAD)
+          if [[ -n "${{ inputs.packages }}" ]]; then
+            mapfile -t packages < <(echo "${{ inputs.packages }}" | tr ',' '\n')
+            echo "forced: ${packages[*]}"
+            {
+              echo "list<<EOF"
+              printf '%s\n' "${packages[@]}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           all=false
           for f in "${files[@]}"; do
             case "$f" in
@@ -153,15 +178,22 @@ jobs:
           # every workspace bin once first. codex-voice-host is excluded
           # because it needs GStreamer >= 1.28, which Ubuntu 24.04 lacks.
           cargo build --workspace --bins --exclude codex-voice-host
+          # Known failures are tests that fail on unmodified fork/main. Each
+          # line of the file is a nextest filterset with a `#` reason citing
+          # the baseline run that showed it failing. Nothing is listed without
+          # that evidence.
+          known=()
+          while IFS= read -r line; do
+            line="${line%%#*}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            [[ -z "$line" ]] && continue
+            known+=("$line")
+          done < "${GITHUB_WORKSPACE}/.github/fork-ci-known-failures.txt"
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
-            # packaged_daemon_bootstrap_seeds_local_package asserts
-            # autoUpdateEnabled == false, but default_auto_update_enabled()
-            # returns true in this tree. It fails on unmodified fork/main, so
-            # it is upstream drift rather than anything a fork PR introduced.
-            extra=()
-            if [[ "$crate" == "codex-cli" ]]; then
-              extra+=(-- --skip packaged_daemon_bootstrap_seeds_local_package)
-            fi
-            cargo test -p "$crate" "${extra[@]}"
+            filter=()
+            for expr in "${known[@]}"; do
+              filter+=(-E "not (${expr})")
+            done
+            cargo nextest run -p "$crate" "${filter[@]}"
           done <<< "${{ steps.crates.outputs.list }}"
