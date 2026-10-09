@@ -101,6 +101,7 @@ fn permission_request_timeout_only_counts_synchronous_handlers() {
         timeout_sec: 5,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: cwd().join("hooks.json").into(),
         source: HookSource::User,
         display_order: 0,
@@ -161,6 +162,7 @@ fn pre_tool_use_hook_events(command: impl Into<String>) -> HookEventsToml {
                 r#async: false,
                 status_message: Some("checking".to_string()),
                 additional_context_limit: None,
+                fail_closed: false,
             }],
         }],
         ..Default::default()
@@ -589,6 +591,7 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
                     r#async: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -702,6 +705,7 @@ async fn requirements_managed_hooks_execute_windows_command_override() {
                     r#async: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -784,6 +788,7 @@ fn unknown_requirement_source_hooks_stay_managed() {
                     r#async: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -855,6 +860,7 @@ fn user_disablement_filters_non_managed_hooks_but_not_managed_hooks() {
                     r#async: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -1104,6 +1110,7 @@ fn requirements_managed_hooks_load_when_managed_dir_is_missing() {
                     r#async: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -1847,6 +1854,7 @@ fn bundled_cleanup_trust_does_not_extend_to_other_handlers() {
             r#async: false,
             status_message: None,
             additional_context_limit: None,
+            fail_closed: false,
         },
     ]);
     source.hooks.stop.push(MatcherGroup {
@@ -2022,6 +2030,7 @@ fn disabled_hooks_feature_keeps_builtin_cleanup_but_not_trusted_plugin_hooks() {
         r#async: false,
         status_message: None,
         additional_context_limit: None,
+        fail_closed: false,
     });
     let stack = trusted_plugin_hook_stack(cwd().join("config.toml"), &[source.clone()]);
     let discovered = super::discovery::discover_handlers(
@@ -2091,6 +2100,7 @@ print(json.dumps({
                     r#async: false,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -2218,6 +2228,7 @@ fn plugin_hook_sources_expand_plugin_placeholders() {
                     r#async: false,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -2380,6 +2391,7 @@ fn executor_stop_hook_fixture() -> (
             timeout_sec: 5,
             status_message: None,
             additional_context_limit: Default::default(),
+            fail_closed: false,
             source_path: HandlerSourcePath::ExecutorScoped {
                 plugin_id: PluginId::parse("computer-use@openai-bundled").expect("valid plugin ID"),
                 environment_id: "executor-a".to_string(),
@@ -2542,6 +2554,7 @@ async fn executor_stop_hooks_run_unless_regular_hooks_block_without_stopping() {
         timeout_sec: 30,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: cwd().join("hooks.json").into(),
         source: HookSource::User,
         display_order: 0,
@@ -2578,6 +2591,7 @@ async fn executor_stop_hooks_run_unless_regular_hooks_block_without_stopping() {
         timeout_sec: 30,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: cwd().join("hooks.json").into(),
         source: HookSource::User,
         display_order: 1,
