@@ -65,6 +65,9 @@ jobs:
             echo "list<<EOF"
             printf '%s\n' "${packages[@]:-}"
             echo "EOF"
+            echo "files<<EOF"
+            printf '%s\n' "${files[@]:-}"
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
       # v8's build.rs otherwise downloads librusty_v8 from denoland, which does
@@ -92,13 +95,34 @@ jobs:
             cargo fmt -p "$crate" -- --check
           done <<< "${{ steps.crates.outputs.list }}"
 
+      # -D warnings would fail the PR on upstream lint debt in files it never
+      # touched, and a fork patch must not have to fix that. Clippy runs without
+      # it, and only a warning or error whose primary span is in a file this PR
+      # changed fails the build. Compile errors are fatal regardless, which
+      # `cargo check` above already enforces.
       - name: cargo clippy
         shell: bash
         run: |
           set -euo pipefail
+          printf '%s\n' "${{ steps.crates.outputs.files }}" | sed 's|^codex-rs/||' > /tmp/changed-files
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
-            cargo clippy -p "$crate" --all-targets -- -D warnings
+            cargo clippy -p "$crate" --all-targets --message-format=json -- -W clippy::all \
+              > "/tmp/clippy-${crate}.json" || true
+            offenders="$(jq -r --slurpfile changed <(jq -R . /tmp/changed-files) '
+              select(.reason == "compiler-message")
+              | .message
+              | select(.level == "warning" or .level == "error")
+              | . as $m
+              | ($m.spans[] | select(.is_primary)) as $s
+              | select([$changed[][]] | index($s.file_name))
+              | "\($s.file_name):\($s.line_start):\($s.column_start): \($m.level): \($m.message)"
+            ' "/tmp/clippy-${crate}.json")"
+            if [[ -n "$offenders" ]]; then
+              echo "$offenders"
+              echo "clippy findings in files this PR changes" >&2
+              exit 1
+            fi
           done <<< "${{ steps.crates.outputs.list }}"
 
       - name: cargo test
