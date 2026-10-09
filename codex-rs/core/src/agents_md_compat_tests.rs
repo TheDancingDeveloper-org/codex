@@ -54,8 +54,11 @@ async fn imports_that_escape_the_project_root_are_refused() {
     let project = tempfile::tempdir().expect("project");
     let outside = tempfile::tempdir().expect("outside");
     write(&outside.path().join("secret.md"), "TOPSECRET\n");
-    std::os::unix::fs::symlink(outside.path().join("secret.md"), project.path().join("escape.md"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(
+        outside.path().join("secret.md"),
+        project.path().join("escape.md"),
+    )
+    .expect("symlink");
     let home = tempfile::tempdir().expect("home");
     write(&home.path().join("secret.md"), "TOPSECRET\n");
     // Safety: this test runs alone and only points HOME at a temp dir.
@@ -87,7 +90,10 @@ async fn imports_that_escape_the_project_root_are_refused() {
     );
     let read = docs.iter().map(|doc| doc.text.len()).sum::<usize>();
     let own = fs::read(project.path().join("CLAUDE.md")).unwrap().len();
-    assert!(read <= own, "read {read} bytes, the project file is only {own}");
+    assert!(
+        read <= own,
+        "read {read} bytes, the project file is only {own}"
+    );
 }
 
 /// A relative import that stays inside the project is expanded.
@@ -113,5 +119,8 @@ async fn imports_inside_the_project_root_are_expanded() {
         .map(|doc| doc.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("body"), "the in-project import was not read: {text}");
+    assert!(
+        text.contains("body"),
+        "the in-project import was not read: {text}"
+    );
 }
