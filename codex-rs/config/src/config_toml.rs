@@ -343,6 +343,14 @@ pub struct ConfigToml {
     #[serde(default)]
     pub claude_compat_instructions: Option<bool>,
 
+    /// Fork (WI-1132): how a directory's project docs are chosen. `first` (the
+    /// default) keeps the upstream behaviour of the first matching filename per
+    /// directory. `all` loads every matching filename, plus `.claude/rules/*.md`
+    /// in sorted order, and expands `@path` imports confined to the project
+    /// root. An unrecognised value falls back to `first`.
+    #[serde(default)]
+    pub project_doc_mode: Option<String>,
+
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,
 
