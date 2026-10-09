@@ -17,6 +17,13 @@ core edits.
   `rust-v0.162.0`. The tag lives on a release branch, not on upstream `main`:
   `2351d9e1b` (upstream `main` at fork time) is 114 commits away and not
   descended from the tag, so it is not a valid base.
+- The `rust-v0.162.1` fixes are carried by cherry-pick rather than by moving
+  `fork/main`, so published `fork-<sha>` release tags stay reachable. The two
+  fix commits are `f715d50688` (daemon feature compatibility checks only on
+  explicit CLI overrides, #52648) and `1a1335eefe` (multiline async questions
+  keep line breaks and links, #51866). The tag commit `092d3acd6b` is not
+  taken: it only bumps the workspace version to `0.162.1`, and the fork keeps
+  its `0.162.0` stamp. Branch `fork/wi-1125-upstream-0-162-1`.
 - All fork work branches off `fork/main` and every fork pull request targets
   `fork/main`. Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
