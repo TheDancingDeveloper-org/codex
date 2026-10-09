@@ -142,14 +142,9 @@ async fn read_agents_md(
     if config.project_doc_all {
         let root = project_root(config, cwd, fs, sandbox).await?;
         let root = root.as_ref().unwrap_or(cwd);
-        let docs = crate::agents_md_compat::expand_project_docs(
-            fs,
-            &paths,
-            root,
-            max_total,
-            sandbox,
-        )
-        .await?;
+        let docs =
+            crate::agents_md_compat::expand_project_docs(fs, &paths, root, max_total, sandbox)
+                .await?;
         let mut loaded = LoadedAgentsMd::default();
         for doc in docs {
             loaded.entries.push(InstructionEntry {
