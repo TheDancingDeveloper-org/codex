@@ -1,0 +1,155 @@
+# Fork-only release workflow. Builds static musl binaries of the fork and
+# publishes a GitHub release tagged with the full fork commit SHA, which is
+# how the Vogt engine installs the fork (WI-1142).
+#
+# New file with a fork-unique name on purpose: upstream workflow files are
+# never edited here, so rebasing onto upstream stays conflict-free.
+name: fork-release
+
+on:
+  push:
+    branches: [fork/main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # aws-lc's jitter entropy path does not build on musl.
+  AWS_LC_SYS_NO_JITTER_ENTROPY: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+
+      # Reuses the upstream musl setup verbatim: zig 0.14.0 as the C toolchain,
+      # then .github/scripts/install-musl-build-tools.sh (musl gcc linker,
+      # libcap built for the target, OpenSSL).
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: "0.14.0"
+          use-cache: false
+
+      - name: Install musl build tools
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+
+      # Downloads the Codex-built rusty_v8 prebuilts from the upstream release
+      # and verifies them against the in-tree checksum manifest.
+      - name: Configure rusty_v8 artifact overrides and verify checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+
+      # bwrap is built and stripped first: linux-sandbox embeds
+      # option_env!("CODEX_BWRAP_SHA256") and verifies the bundled bwrap
+      # against it, so the digest must be exported before the codex build.
+      - name: Build bwrap and export digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          cargo build --target "$target" --release --bin bwrap
+          bwrap_path="target/${target}/release/bwrap"
+          strip --strip-debug --strip-unneeded "$bwrap_path"
+          digest="$(sha256sum "$bwrap_path" | awk '{print $1}')"
+          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
+
+      # The workspace version is 0.0.0; stamp it as <upstream tag>+fork.<sha>
+      # so `codex --version` reports the fork. Cargo bakes the version in via
+      # CARGO_PKG_VERSION, which clap's `version` attribute prints.
+      - name: Stamp fork version
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The fork base is the upstream stable tag; recorded in FORK.md and
+          # advanced by the rebase procedure. `git describe` cannot be used:
+          # upstream tags are not fetched into this checkout.
+          upstream_version="0.162.0"
+          stamp="${upstream_version}+fork.${GITHUB_SHA:0:9}"
+          sed -i "0,/^version = \"0.0.0\"/s//version = \"${stamp}\"/" codex-rs/Cargo.toml
+          grep -m1 '^version' codex-rs/Cargo.toml
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          cargo build --target "$target" --release --bin codex --bin codex-code-mode-host
+          for bin in codex codex-code-mode-host bwrap; do
+            strip --strip-debug --strip-unneeded "target/${target}/release/${bin}"
+          done
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          stage="dist/${target}"
+          mkdir -p "$stage"
+          for bin in codex codex-code-mode-host bwrap; do
+            cp "target/${target}/release/${bin}" "$stage/${bin}"
+          done
+          (cd dist && sha256sum "${target}/codex" "${target}/codex-code-mode-host" "${target}/bwrap") > "dist/SHA256SUMS-${target}"
+          tar -C dist -czf "dist/codex-${target}.tar.gz" "${target}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/codex-${{ matrix.target }}.tar.gz
+            dist/SHA256SUMS-${{ matrix.target }}
+
+  release:
+    name: publish
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Assemble checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat release/SHA256SUMS-* | sort > release/SHA256SUMS
+          rm release/SHA256SUMS-*
+
+      # The release tag is the full fork commit SHA, so the Vogt engine can
+      # install exactly the commit it pins.
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_SHA" >/dev/null 2>&1; then
+            echo "release ${GITHUB_SHA} already exists"
+            exit 0
+          fi
+          gh release create "$GITHUB_SHA" release/* \
+            --target "$GITHUB_SHA" \
+            --title "fork ${GITHUB_SHA:0:9}" \
+            --notes "Fork build of ${GITHUB_SHA}. Static musl binaries for x86_64 and aarch64; verify with SHA256SUMS."
