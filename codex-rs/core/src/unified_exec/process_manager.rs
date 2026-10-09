@@ -1820,6 +1820,17 @@ impl UnifiedExecProcessManager {
             .map(|entry| entry.environment_id.clone())
     }
 
+    /// The directory the exec process was started in. This is the start cwd,
+    /// not the shell's current directory: a `cd` typed into the shell is not tracked.
+    pub(crate) async fn start_cwd_for_process(&self, process_id: i32) -> Option<PathUri> {
+        self.process_store
+            .lock()
+            .await
+            .processes
+            .get(&process_id)
+            .map(|entry| entry.cwd.clone())
+    }
+
     pub(crate) async fn list_processes(&self) -> Vec<BackgroundTerminalInfo> {
         let store = self.process_store.lock().await;
         let mut entries = store

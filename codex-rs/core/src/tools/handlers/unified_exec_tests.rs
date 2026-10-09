@@ -632,7 +632,6 @@ async fn exec_command_pre_tool_use_payload_resolves_workdir() {
 }
 
 #[tokio::test]
-async fn exec_command_pre_tool_use_payload_skips_write_stdin() {
 async fn write_stdin_pre_tool_use_payload_reviews_nonempty_input_as_bash() {
     let payload = ToolPayload::Function {
         arguments: serde_json::json!({ "session_id": 1, "chars": "git reset --hard\n" }).to_string(),
@@ -655,7 +654,7 @@ async fn write_stdin_pre_tool_use_payload_reviews_nonempty_input_as_bash() {
         }),
         Some(crate::tools::registry::PreToolUsePayload {
             tool_name: HookToolName::bash(),
-            tool_input: serde_json::json!({ "command": "git reset --hard\n" }),
+            tool_input: serde_json::json!({ "command": "git reset --hard\n", "workdir": null }),
         })
     );
 }
