@@ -182,8 +182,13 @@ pub enum HookHandlerConfig {
             skip_serializing_if = "Option::is_none"
         )]
         additional_context_limit: Option<usize>,
-        /// When true, a hook that fails for any reason blocks the tool instead of
-        /// letting it run. Defaults to false so existing handlers keep failing open.
+        /// When true, a failure of this command hook blocks the tool instead of
+        /// failing open. Defaults to false, so existing handlers are unchanged.
+        /// Only command hooks carry this field; MCP tool hooks always fail open.
+        /// It also has no effect on a hook that never runs, such as an untrusted
+        /// user or project hook, or when the hooks feature is disabled. An async
+        /// handler that sets it runs synchronously, because a block can only be
+        /// applied before the tool starts.
         #[serde(default, rename = "failClosed")]
         fail_closed: bool,
     },
