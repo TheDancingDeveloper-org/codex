@@ -4964,3 +4964,8 @@ mod tests {
 #[cfg(all(test, unix))]
 #[path = "daemon_update_tests.rs"]
 mod daemon_update_tests;
+
+fn _fork_ci_lint_on_changed_line() -> i32 {
+    let value = 1;
+    value
+}
