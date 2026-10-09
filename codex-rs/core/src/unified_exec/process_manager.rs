@@ -1822,10 +1822,12 @@ impl UnifiedExecProcessManager {
 
     /// The directory the exec process was started in. This is the start cwd,
     /// not the shell's current directory: a `cd` typed into the shell is not tracked.
-    pub(crate) async fn start_cwd_for_process(&self, process_id: i32) -> Option<PathUri> {
+    /// Returns `None` when the process is gone or the store is busy, so the caller
+    /// never blocks on the lock.
+    pub(crate) fn start_cwd_for_process(&self, process_id: i32) -> Option<PathUri> {
         self.process_store
-            .lock()
-            .await
+            .try_lock()
+            .ok()?
             .processes
             .get(&process_id)
             .map(|entry| entry.cwd.clone())
