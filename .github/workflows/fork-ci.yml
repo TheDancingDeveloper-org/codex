@@ -1,0 +1,71 @@
+# Fork-only CI. The upstream blocking-ci, CLA and v8-canary workflows are
+# disabled on this fork, so this is the check that runs on fork pull requests.
+# New file with a fork-unique name; no upstream workflow is edited.
+name: fork-ci
+
+on:
+  pull_request:
+    branches: [fork/main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt, clippy
+
+      # Only the crates a fork patch touches are checked. Docs and workflow
+      # changes test nothing.
+      - name: Crates changed against fork/main
+        id: crates
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
+          mapfile -t crates < <(git diff --name-only "$base"...HEAD \
+            | awk -F/ '/^codex-rs\/[^/]+\/src\//{print $2}' | sort -u)
+          echo "changed: ${crates[*]:-none}"
+          {
+            echo "list<<EOF"
+            printf '%s\n' "${crates[@]:-}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: cargo fmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r crate; do
+            [[ -z "$crate" ]] && continue
+            cargo fmt -p "$crate" -- --check
+          done <<< "${{ steps.crates.outputs.list }}"
+
+      - name: cargo clippy
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r crate; do
+            [[ -z "$crate" ]] && continue
+            cargo clippy -p "$crate" --all-targets -- -D warnings
+          done <<< "${{ steps.crates.outputs.list }}"
+
+      - name: cargo test
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r crate; do
+            [[ -z "$crate" ]] && continue
+            cargo test -p "$crate"
+          done <<< "${{ steps.crates.outputs.list }}"
