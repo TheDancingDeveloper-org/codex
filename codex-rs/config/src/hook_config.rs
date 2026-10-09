@@ -182,6 +182,10 @@ pub enum HookHandlerConfig {
             skip_serializing_if = "Option::is_none"
         )]
         additional_context_limit: Option<usize>,
+        /// When true, a hook that fails for any reason blocks the tool instead of
+        /// letting it run. Defaults to false so existing handlers keep failing open.
+        #[serde(default, rename = "failClosed")]
+        fail_closed: bool,
     },
     #[serde(rename = "mcp_tool")]
     McpTool {

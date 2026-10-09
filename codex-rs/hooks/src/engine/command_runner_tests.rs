@@ -117,6 +117,7 @@ async fn hook_shell_startup_does_not_stop_on_controlling_terminal() {
         timeout_sec: 2,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: AbsolutePathBuf::try_from(temp.path().join("hooks.json"))
             .expect("absolute hook configuration path")
             .into(),
@@ -221,6 +222,7 @@ async fn cmd_shell_runs_quoted_hook_command_path() {
         timeout_sec: 10,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: source_path.into(),
         source: HookSource::User,
         display_order: 0,
@@ -271,6 +273,7 @@ async fn fast_exiting_hook_preserves_stdout_when_stdin_is_not_consumed() {
         timeout_sec: 10,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: source_path.into(),
         source: HookSource::User,
         display_order: 0,
@@ -359,6 +362,7 @@ async fn command_hook_does_not_expose_configured_noise_auth_token() {
         timeout_sec: 10,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: source_path.into(),
         source: HookSource::User,
         display_order: 0,
@@ -497,6 +501,7 @@ fn write_handler(temp: &TempDir, source: &str) -> ConfiguredHandler {
         timeout_sec: 10,
         status_message: None,
         additional_context_limit: Default::default(),
+        fail_closed: false,
         source_path: AbsolutePathBuf::try_from(temp.path().join("hooks.json"))
             .expect("absolute test hook path")
             .into(),
