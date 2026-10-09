@@ -540,6 +540,19 @@ fn append_matcher_groups(
                             source.path.display()
                         ));
                     }
+                    // `failClosed` only takes effect on a synchronous handler, so an
+                    // async handler that asks for it runs synchronously. Skipping it
+                    // would let the tool run with no guard at all.
+                    let runs_async = if runs_async && fail_closed {
+                        warnings.push(format!(
+                            "running async {} hook synchronously in {} because failClosed is set",
+                            hook_event_name_label(event_name),
+                            source.path.display()
+                        ));
+                        false
+                    } else {
+                        runs_async
+                    };
                     let additional_context_limit = if matches!(
                         event_name,
                         codex_protocol::protocol::HookEventName::PreToolUse
@@ -1486,6 +1499,43 @@ mod tests {
                 "clamping Interrupt hook timeout to 3s in {}",
                 source_path.display()
             )]
+        );
+    }
+
+    #[test]
+    fn fail_closed_forces_an_async_handler_to_run_synchronously() {
+        let source_path = source_path();
+        let hook_states = std::collections::HashMap::new();
+        let mut handlers = Vec::new();
+        let mut warnings = Vec::new();
+
+        append_matcher_groups(
+            &mut handlers,
+            &mut Vec::new(),
+            &mut warnings,
+            &mut 0,
+            &mut hook_handler_source(&source_path, &hook_states),
+            HookEventName::PreToolUse,
+            vec![MatcherGroup {
+                matcher: Some("Bash".to_string()),
+                hooks: vec![HookHandlerConfig::Command {
+                    command: "echo guard".to_string(),
+                    command_windows: None,
+                    timeout_sec: None,
+                    r#async: true,
+                    status_message: None,
+                    additional_context_limit: None,
+                    fail_closed: true,
+                }],
+            }],
+        );
+
+        assert_eq!(handlers.len(), 1);
+        assert!(handlers[0].fail_closed);
+        assert_eq!(handlers[0].execution_mode(), HookExecutionMode::Sync);
+        assert!(
+            warnings.iter().any(|warning| warning.contains("failClosed")),
+            "expected a warning about the async/failClosed combination, got {warnings:?}"
         );
     }
 
