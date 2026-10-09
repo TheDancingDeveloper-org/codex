@@ -72,6 +72,9 @@ async fn the_budget_covers_claude_files_and_rules_together() {
 
     let text = loaded.instructions.expect("instructions").text;
     assert!(text.contains(claude_md));
-    assert!(!text.contains("rule body"), "rule must be past the budget: {text:?}");
+    assert!(
+        !text.contains("rule body"),
+        "rule must be past the budget: {text:?}"
+    );
     assert_eq!(loaded.warnings.len(), 1);
 }
