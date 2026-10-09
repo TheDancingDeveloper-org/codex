@@ -13,7 +13,10 @@ core edits.
 - `main` is a pure mirror of upstream `main`. Nothing fork-specific is ever
   committed to it, and it is never the base of a fork pull request.
 - `fork/main` is the fork line: an upstream stable tag plus the carried patch
-  series. It was created at `2351d9e1b` (upstream tag `rust-v0.162.0`).
+  series. It currently sits on `c1382380d`, the commit of upstream tag
+  `rust-v0.162.0`. The tag lives on a release branch, not on upstream `main`:
+  `2351d9e1b` (upstream `main` at fork time) is 114 commits away and not
+  descended from the tag, so it is not a valid base.
 - All fork work branches off `fork/main` and every fork pull request targets
   `fork/main`. Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
@@ -33,10 +36,11 @@ a tag ships:
 3. Run the patched crates' tests: app-server, tui, core spawn, agents_md,
    hooks. Regenerate the app-server schema fixtures.
 4. Replay the proxy fixtures against the new Responses request shapes.
-5. Fast-forward `fork/main` to the result and push it.
-6. The release workflow (`.github/workflows/fork-release.yml`) builds static
-   musl binaries and publishes a GitHub release tagged with the full
-   `fork/main` commit SHA.
+5. Update `fork/main` to the result with `git push --force-with-lease` and
+   publish the release. A rebase onto a new tag is not a fast-forward, and a
+   plain `--force` is never used. The procedure itself, including why each
+   published release tag must stay reachable, is the runbook at
+   `docs/fork-upstream-sync.md`.
 
 Record the new base tag and any dropped or reworked patch in the table below.
 
