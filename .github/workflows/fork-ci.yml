@@ -15,6 +15,10 @@ jobs:
   check:
     name: fmt, clippy, test
     runs-on: ubuntu-24.04
+    # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
+    defaults:
+      run:
+        working-directory: codex-rs
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
         with:
@@ -26,22 +30,47 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # Only the crates a fork patch touches are checked. Docs and workflow
-      # changes test nothing.
-      - name: Crates changed against fork/main
+      # linux-sandbox's build.rs links libcap through pkg-config.
+      - name: Install build libraries
+        working-directory: ${{ github.workspace }}
+        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config
+
+      # Directory names are not package names (app-server-protocol is the
+      # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
+      # so each changed file maps to the package whose manifest directory is
+      # the longest prefix of its path. A workspace manifest change rebuilds
+      # every package.
+      - name: Packages changed against fork/main
         id: crates
         shell: bash
         run: |
           set -euo pipefail
           base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
-          mapfile -t crates < <(git diff --name-only "$base"...HEAD \
-            | awk -F/ '/^codex-rs\/[^/]+\/.+/{print $2}' | sort -u)
-          echo "changed: ${crates[*]:-none}"
+          mapfile -t files < <(git diff --name-only "$base"...HEAD)
+          all=false
+          for f in "${files[@]}"; do
+            case "$f" in
+              codex-rs/Cargo.toml|codex-rs/Cargo.lock) all=true ;;
+            esac
+          done
+          if $all; then
+            mapfile -t packages < <(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[].name' | sort -u)
+          else
+            mapfile -t packages < <(cargo metadata --no-deps --format-version 1 \
+              | python3 "${GITHUB_WORKSPACE}/.github/scripts/fork-changed-packages.py" "${files[@]}")
+          fi
+          echo "changed: ${packages[*]:-none}"
           {
             echo "list<<EOF"
-            printf '%s\n' "${crates[@]:-}"
+            printf '%s\n' "${packages[@]:-}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+      # A whole-workspace check, because a struct-field patch breaks dependents
+      # that a per-package test never compiles.
+      - name: cargo check
+        run: cargo check --workspace --all-targets
 
       - name: cargo fmt
         shell: bash
