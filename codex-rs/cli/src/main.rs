@@ -101,7 +101,7 @@ use codex_core::config::resolve_profile_v2_config_path;
 use codex_features::FEATURES;
 use codex_features::Stage;
 use codex_features::is_known_feature_key;
-use codex_home::CodexHomeUserInstructionsProvider;
+use codex_home::user_instructions_provider;
 use codex_login::AuthManager;
 use codex_login::is_workload_identity_selected;
 use codex_memories_write::clear_memory_roots_contents;
@@ -2054,9 +2054,11 @@ async fn run_debug_prompt_input_command(
         });
     }
 
-    let user_instructions_provider = Arc::new(CodexHomeUserInstructionsProvider::new(
+    let user_instructions_provider = user_instructions_provider(
         config.codex_home.clone(),
-    ));
+        config.claude_compat_instructions,
+        config.project_doc_max_bytes,
+    );
     let auth_manager =
         AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await?;
     let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
