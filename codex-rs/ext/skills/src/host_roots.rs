@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStack;
+use codex_config::SkillsConfig;
 use codex_config::default_project_root_markers;
 use codex_config::merge_toml_values;
 use codex_config::project_root_markers_from_config;
@@ -23,6 +24,40 @@ use crate::loader::HostSkillRoot;
 
 const AGENTS_DIR_NAME: &str = ".agents";
 const SKILLS_DIR_NAME: &str = "skills";
+
+/// The extra roots configured under `[skills]`, or none when the config is
+/// absent or invalid. An invalid table warns and changes nothing.
+fn extra_skill_roots(config_layer_stack: &ConfigLayerStack, project: bool) -> Vec<String> {
+    let effective = config_layer_stack.effective_config();
+    let Some(value) = effective.as_table().and_then(|table| table.get("skills")) else {
+        return Vec::new();
+    };
+    let skills: SkillsConfig = match value.clone().try_into() {
+        Ok(skills) => skills,
+        Err(err) => {
+            tracing::warn!("invalid skills config: {err}");
+            return Vec::new();
+        }
+    };
+    if project {
+        skills.extra_project_roots
+    } else {
+        skills.extra_user_roots
+    }
+}
+
+/// Joins `relative` onto `base` and keeps it only when it stays inside `base`.
+///
+/// An absolute value, a `..` climb or anything else that resolves outside the
+/// base is dropped, so a config cannot point skill loading at arbitrary paths.
+fn confined_join(base: &AbsolutePathBuf, relative: &str) -> Option<AbsolutePathBuf> {
+    let relative = relative.trim().trim_start_matches(['/', '\\']);
+    if relative.is_empty() {
+        return None;
+    }
+    let joined = base.join(relative);
+    joined.starts_with(base).then_some(joined)
+}
 const MAX_CONCURRENT_ANCESTOR_PROBES: usize = 256;
 
 pub(crate) async fn resolve_skill_roots(
@@ -99,6 +134,11 @@ fn roots_from_layer_stack(
                     config_folder.join(SKILLS_DIR_NAME),
                     SkillScope::User,
                 ));
+                for relative in extra_skill_roots(config_layer_stack, /*project*/ false) {
+                    if let Some(path) = confined_join(&config_folder, &relative) {
+                        roots.push(local_root(path, SkillScope::User));
+                    }
+                }
 
                 if let Some(home_dir) = home_dir {
                     roots.push(local_root(
@@ -178,6 +218,25 @@ async fn repo_agents_skill_roots(
                     "failed to stat repo skills root {}: {error:#}",
                     agents_skills.display()
                 );
+            }
+        }
+    }
+    for directory in dirs_between_project_root_and_cwd(cwd, &project_root) {
+        for relative in extra_skill_roots(config_layer_stack, /*project*/ true) {
+            let Some(path) = confined_join(&directory, &relative) else {
+                continue;
+            };
+            let uri = PathUri::from_abs_path(&path);
+            if let Ok(metadata) = repository_file_system
+                .get_metadata(&uri, GetMetadataOptions::default(), /*sandbox*/ None)
+                .await
+                && metadata.is_directory
+            {
+                roots.push(HostSkillRoot::host(
+                    path,
+                    SkillScope::Repo,
+                    Arc::clone(&repository_file_system),
+                ));
             }
         }
     }
