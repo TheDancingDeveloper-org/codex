@@ -32,6 +32,18 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # fork/main sits on an upstream release tag, whose release commit bumps
+      # the workspace version from 0.0.0 to the tag (Cargo.lock keeps 0.0.0).
+      # Upstream runs its tests at 0.0.0 and never on the tag commit, so its
+      # snapshots render "v0.0.0" and its daemon tests rely on 0.0.0 counting
+      # as a dev build. Test at 0.0.0 the same way. fork-release stamps the
+      # real version separately, so releases are unaffected.
+      - name: Test at upstream's development version
+        run: |
+          sed -i '/^\[workspace.package\]$/,/^\[/ s/^version = ".*"$/version = "0.0.0"/' Cargo.toml
+          grep -A1 '^\[workspace.package\]$' Cargo.toml | grep -qx 'version = "0.0.0"' \
+            || { echo "workspace version reset did not land" >&2; exit 1; }
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
