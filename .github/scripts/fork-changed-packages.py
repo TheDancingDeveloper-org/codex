@@ -51,20 +51,28 @@ def owner_of(path, dirs):
 
 
 def reverse_closure(meta, names):
-    """Workspace members that depend on `names`, directly or transitively."""
+    """Workspace members that depend on `names`, directly or transitively.
+
+    The selection step runs `cargo metadata --no-deps`, whose `resolve` is null,
+    so the only edges available are the declared requirements. A declared
+    dependency names a workspace member when it has a `path` or its `name` is
+    itself a member; registry requirements match neither.
+    """
     members = set(meta.get("workspace_members", []))
-    by_id = {package["id"]: package for package in meta["packages"]}
+    member_names = {
+        package["name"]
+        for package in meta["packages"]
+        if package["id"] in members
+    }
     # name -> packages in the workspace that list it as a normal/dev/build dep
     dependents = {}
     for package in meta["packages"]:
         if package["id"] not in members:
             continue
         for dep in package.get("dependencies", []):
-            dep_id = dep.get("pkg") or dep.get("id")
-            target = by_id.get(dep_id)
-            if target is None:
-                continue
-            dependents.setdefault(target["name"], set()).add(package["name"])
+            dep_name = dep.get("name")
+            if dep.get("path") or dep_name in member_names:
+                dependents.setdefault(dep_name, set()).add(package["name"])
     selected = set(names)
     frontier = list(names)
     while frontier:

@@ -162,6 +162,13 @@ jobs:
               mv /tmp/Cargo.lock.head Cargo.lock
               trap - EXIT
               mapfile -t locked < <(python3 "${GITHUB_WORKSPACE}/.github/scripts/fork-lock-affected.py" "$base_meta" "$head_meta")
+              if (( ${#locked[@]} == 0 )); then
+                # A lock that "affects nothing" is a bug in the diff far more
+                # often than a fact, and skipping every check would fail open.
+                echo "::warning::Cargo.lock changed but the resolve diff selected nothing; selecting every member"
+                mapfile -t locked < <(jq -r --argjson members "$(jq -c '.workspace_members' "$head_meta")" \
+                  '.packages[] | select(.id as $id | $members | index($id)) | .name' "$head_meta" | sort -u)
+              fi
               packages+=("${locked[@]}")
             fi
           fi
@@ -226,76 +233,30 @@ jobs:
           cargo clippy "${args[@]}" --all-targets --timings --message-format=json -- -W clippy::all \
             > /tmp/clippy.json || true
           [[ -f cargo-timing.html ]] && cp cargo-timing.html /tmp/cargo-timings/clippy-timing.html
-          # The single JSON stream mixes every package. Split it back into one
-          # file per crate on package_id (falling back to the primary span's
-          # path) so the per-crate report below is unchanged.
-          printf '%s\n' "${crates[@]}" > /tmp/crates
-          python3 - <<'PY'
-          import json
-          crates = [line.strip() for line in open("/tmp/crates") if line.strip()]
-          # Longest name first, so a prefix of another package name cannot win.
-          by_length = sorted(crates, key=len, reverse=True)
-          buckets = {crate: [] for crate in crates}
-          other = []
-
-          def attribute(package_id):
-              # cargo's package_id is `name version (source)`, a path+url spec,
-              # or `registry+url#name@version`. The leading token is only the
-              # name in the first of those.
-              token = package_id.split()[0] if package_id else ""
-              if token in buckets:
-                  return token
-              for crate in by_length:
-                  if (f"#{crate}@" in package_id) or package_id.startswith(crate + " "):
-                      return crate
-              return ""
-
-          for line in open("/tmp/clippy.json"):
-              line = line.strip()
-              if not line:
-                  continue
-              try:
-                  msg = json.loads(line)
-              except json.JSONDecodeError:
-                  other.append(line)
-                  continue
-              name = attribute(msg.get("package_id", ""))
-              (buckets[name] if name in buckets else other).append(line)
-          for crate, lines in buckets.items():
-              with open(f"/tmp/clippy-{crate}.json", "w") as handle:
-                  handle.write("\n".join(lines) + ("\n" if lines else ""))
-          if other:
-              with open("/tmp/clippy-unattributed.json", "w") as handle:
-                  handle.write("\n".join(other) + "\n")
-          PY
-          for crate in "${crates[@]}"; do
-            # --slurpfile yields an array of strings. Iterating each element
-            # again (`[$changed[][]]`) is a jq runtime error, and jq exits 0 on
-            # those, so the gate would pass every PR. `any` compares strings
-            # directly. stderr goes to a file synchronously: a process
-            # substitution can still be writing when the check runs, which
-            # would let a jq error pass again.
-            rm -f /tmp/jq-err
-            offenders="$(jq -r --slurpfile changed <(jq -R . /tmp/changed-files) '
-              select(.reason == "compiler-message")
-              | .message
-              | select(.level == "warning" or .level == "error")
-              | . as $m
-              | ($m.spans[] | select(.is_primary)) as $s
-              | select(any($changed[]; . == $s.file_name))
-              | "\($s.file_name):\($s.line_start):\($s.column_start): \($m.level): \($m.message)"
-            ' "/tmp/clippy-${crate}.json" 2>/tmp/jq-err)"
-            if [[ -s /tmp/jq-err ]]; then
-              cat /tmp/jq-err >&2
-              echo "jq failed to read the clippy output" >&2
-              exit 1
-            fi
-            if [[ -n "$offenders" ]]; then
-              echo "$offenders"
-              echo "clippy findings in files this PR changes" >&2
-              exit 1
-            fi
-          done
+          # The gate is by changed file path, so it reads the whole stream once.
+          # Splitting per crate first drops every lint from a crate whose
+          # package id omits the name (cargo does that when the name equals the
+          # directory's last segment: codex-home, codex-api, ...).
+          rm -f /tmp/jq-err
+          offenders="$(jq -r --slurpfile changed <(jq -R . /tmp/changed-files) '
+            select(.reason == "compiler-message")
+            | .message
+            | select(.level == "warning" or .level == "error")
+            | . as $m
+            | ($m.spans[] | select(.is_primary)) as $s
+            | select(any($changed[]; . == $s.file_name))
+            | "\($s.file_name):\($s.line_start):\($s.column_start): \($m.level): \($m.message)"
+          ' /tmp/clippy.json 2>/tmp/jq-err)"
+          if [[ -s /tmp/jq-err ]]; then
+            cat /tmp/jq-err >&2
+            echo "jq failed to read the clippy output" >&2
+            exit 1
+          fi
+          if [[ -n "$offenders" ]]; then
+            echo "$offenders"
+            echo "clippy findings in files this PR changes" >&2
+            exit 1
+          fi
 
       - name: cargo test
         shell: bash
