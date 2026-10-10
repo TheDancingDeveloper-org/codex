@@ -6850,6 +6850,11 @@
       "description": "When `true`, checks for Codex updates on startup and surfaces update prompts. Set to `false` only if your Codex updates are centrally managed. Defaults to `true`.",
       "type": "boolean"
     },
+    "claude_compat_instructions": {
+      "default": null,
+      "description": "Fork (WI-1131): also load the user's global Claude Code instructions (`~/.claude/CLAUDE.md` and `~/.claude/rules/*.md`) into the user instructions snapshot. Off by default, so upstream behaviour is unchanged unless a config sets it.",
+      "type": "boolean"
+    },
     "cli_auth_credentials_store": {
       "allOf": [
         {
