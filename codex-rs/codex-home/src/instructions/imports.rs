@@ -178,11 +178,56 @@ impl Expander {
         self.files[index].text = body;
     }
 
+    /// Whether `path` resolves inside an allowed root.
+    ///
+    /// Walks up to the nearest ancestor that exists and canonicalizes that, so a
+    /// reference to a file that has not been created yet is still confined. With
+    /// no roots configured nothing is confined.
+    async fn within_allowed_roots(&self, path: &Path) -> bool {
+        let Some(roots) = &self.allowed_roots else {
+            return true;
+        };
+        let mut ancestor = path;
+        let mut rest = PathBuf::new();
+        let canonical = loop {
+            if ancestor.as_os_str().is_empty() {
+                return false;
+            }
+            match tokio::fs::canonicalize(ancestor).await {
+                Ok(canonical) => break canonical,
+                Err(_) => match ancestor.parent() {
+                    Some(parent) => {
+                        if let Some(name) = ancestor.file_name() {
+                            rest = Path::new(name).join(&rest);
+                        }
+                        ancestor = parent;
+                    }
+                    None => return false,
+                },
+            }
+        };
+        let resolved = canonical.join(rest);
+        roots.iter().any(|root| resolved.starts_with(root))
+    }
+
     /// Reads a regular file within the remaining budget.
     async fn read(&mut self, path: &Path) -> Option<(PathBuf, String)> {
         let canonical = match tokio::fs::canonicalize(path).await {
             Ok(path) => path,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return None,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                // A missing file is normally not an import. Once confinement is
+                // on it is also the way past it: a path that cannot be
+                // canonicalized cannot be shown to fall inside a root, and
+                // returning None would leave it unreported. Only a path that
+                // resolves inside a root may be treated as absent.
+                if self.allowed_roots.is_some() && !self.within_allowed_roots(path).await {
+                    self.warnings.push(format!(
+                        "Refused instructions from `{}`: it is outside the allowed project roots",
+                        path.display()
+                    ));
+                }
+                return None;
+            }
             Err(err) => {
                 self.warnings.push(format!(
                     "Failed to read instructions from `{}`: {err}",

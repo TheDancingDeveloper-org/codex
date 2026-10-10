@@ -191,3 +191,26 @@ async fn imports_outside_the_allowed_roots_are_refused() {
         expansion.warnings
     );
 }
+
+/// A reference to a file that does not exist must still be confined. Treating
+/// "not found" as "not an import" would let `@/etc/hostname` through on a host
+/// where that file is absent, which is exactly where the confinement matters.
+#[tokio::test]
+async fn a_missing_file_outside_the_roots_is_refused() {
+    let project = tempfile::tempdir().expect("temp dir");
+    write(
+        &project.path().join("CLAUDE.md"),
+        "@missing.md\n@/no/such/file.md\n",
+    );
+    let roots = vec![project.path().to_path_buf()];
+
+    let expansion =
+        expand_imports(&project.path().join("CLAUDE.md"), None, 1024, Some(&roots)).await;
+
+    assert_eq!(expansion.warnings.len(), 1, "{:?}", expansion.warnings);
+    assert!(expansion.warnings[0].contains("/no/such/file.md"));
+    assert_eq!(
+        expansion.bytes_read,
+        fs::read(project.path().join("CLAUDE.md")).unwrap().len()
+    );
+}
