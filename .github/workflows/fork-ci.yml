@@ -21,7 +21,11 @@ permissions:
 jobs:
   check:
     name: fmt, clippy, test
-    runs-on: ubuntu-24.04
+    # Trusted runs (same-repo PRs, workflow_dispatch) use the GCP Spot runner
+    # (30 vCPU, persistent sccache; started on demand by the Node B poller).
+    # Fork PRs stay on GitHub-hosted runners: a persistent self-hosted runner
+    # must never execute untrusted fork code.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy"]') }}
     # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:
@@ -59,7 +63,9 @@ jobs:
 
       # linux-sandbox's build.rs links libcap through pkg-config. bubblewrap is
       # what the sandbox tests actually run.
+      # The rust-heavy runner preinstalls these at boot; jobs there have no sudo.
       - name: Install build libraries
+        if: runner.environment == 'github-hosted'
         working-directory: ${{ github.workspace }}
         run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
 
@@ -67,7 +73,9 @@ jobs:
       # every sandbox test fails without this. Copied from
       # .github/actions/setup-ci/action.yml, which upstream's Linux nextest
       # jobs run before testing.
+      # rust-heavy applies these sysctls at boot (/etc/sysctl.d/60-gha-userns.conf).
       - name: Allow unprivileged user namespaces
+        if: runner.environment == 'github-hosted'
         working-directory: ${{ github.workspace }}
         run: |
           sudo sysctl -w kernel.unprivileged_userns_clone=1
