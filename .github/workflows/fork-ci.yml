@@ -211,9 +211,12 @@ jobs:
           fi
           # A failing crate must not hide the rest: the baseline needs every
           # crate's result, and a PR should see all of its failures at once.
+          # nextest is fail-fast by default and cancels a crate's remaining
+          # tests at its first failure, so --no-fail-fast does the same within
+          # a crate.
           status=0
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
-            cargo nextest run -p "$crate" "${filter[@]}" || status=1
+            cargo nextest run -p "$crate" --no-fail-fast "${filter[@]}" || status=1
           done <<< "${{ steps.crates.outputs.list }}"
           exit "$status"
