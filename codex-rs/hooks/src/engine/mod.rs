@@ -67,6 +67,8 @@ pub(crate) struct ConfiguredHandler {
     pub timeout_sec: u64,
     pub status_message: Option<String>,
     pub additional_context_limit: AdditionalContextLimit,
+    /// Opt-in: a failed run of this handler blocks the tool instead of failing open.
+    pub fail_closed: bool,
     pub source_path: HandlerSourcePath,
     pub source: HookSource,
     pub display_order: i64,
@@ -327,6 +329,7 @@ impl ClaudeHooksEngine {
                     timeout_sec: timeout_sec.unwrap_or(5).max(1),
                     status_message,
                     additional_context_limit: Default::default(),
+                    fail_closed: false,
                     source_path: HandlerSourcePath::ExecutorScoped {
                         plugin_id: source.plugin_id.clone(),
                         environment_id: source.environment_id.clone(),

@@ -48,12 +48,40 @@ fn hooks_file_deserializes_existing_json_shape() {
                         r#async: false,
                         status_message: Some("checking".to_string()),
                         additional_context_limit: Some(4096),
+                        fail_closed: false,
                     }],
                 }],
                 ..Default::default()
             },
         }
     );
+}
+
+#[test]
+fn command_hook_fail_closed_defaults_false_and_round_trips() {
+    let omitted = serde_json::from_str::<HookHandlerConfig>(
+        r#"{ "type": "command", "command": "python3 /tmp/pre.py" }"#,
+    )
+    .expect("deserialize");
+    assert!(matches!(
+        omitted,
+        HookHandlerConfig::Command {
+            fail_closed: false,
+            ..
+        }
+    ));
+
+    let set = serde_json::from_str::<HookHandlerConfig>(
+        r#"{ "type": "command", "command": "python3 /tmp/pre.py", "failClosed": true }"#,
+    )
+    .expect("deserialize");
+    assert!(matches!(
+        set,
+        HookHandlerConfig::Command {
+            fail_closed: true,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -182,6 +210,7 @@ additionalContextLimit = 4096
                     r#async: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: Some(4096),
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -220,6 +249,7 @@ command = "python3 /tmp/pre.py"
                         r#async: false,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     }],
                 }],
                 ..Default::default()
@@ -266,6 +296,7 @@ command = "python3 /enterprise/place/pre.py"
                         r#async: false,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     }],
                 }],
                 ..Default::default()
@@ -303,6 +334,7 @@ command_windows = "powershell -File C:\\enterprise\\hooks\\pre.ps1"
                     r#async: false,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -339,6 +371,7 @@ commandWindows = "powershell -File C:\\enterprise\\hooks\\pre.ps1"
                     r#async: false,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
             ..Default::default()
@@ -355,6 +388,7 @@ fn hook_handler_omits_unset_additional_context_limit() {
         r#async: false,
         status_message: None,
         additional_context_limit: None,
+        fail_closed: false,
     };
 
     let serialized = serde_json::to_value(handler).expect("hook handler should serialize");
