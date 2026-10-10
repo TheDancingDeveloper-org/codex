@@ -139,6 +139,30 @@ async fn read_agents_md(
         return Ok(None);
     }
 
+    if config.project_doc_all {
+        let root = project_root(config, cwd, fs, sandbox).await?;
+        let root = root.as_ref().unwrap_or(cwd);
+        let docs =
+            crate::agents_md_compat::expand_project_docs(fs, &paths, root, max_total, sandbox)
+                .await?;
+        let mut loaded = LoadedAgentsMd::default();
+        for doc in docs {
+            loaded.entries.push(InstructionEntry {
+                contents: doc.text,
+                provenance: InstructionProvenance::Project {
+                    source_path: doc.path,
+                    environment_id: environment_id.to_string(),
+                    cwd: cwd.clone(),
+                },
+            });
+        }
+        return if loaded.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(loaded))
+        };
+    }
+
     let mut remaining: u64 = max_total as u64;
     let mut loaded = LoadedAgentsMd::default();
 
@@ -195,31 +219,8 @@ async fn agents_md_paths(
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> io::Result<Vec<PathUri>> {
+    let project_root = project_root(config, cwd, fs, sandbox).await?;
     let dir = cwd.clone();
-
-    let mut merged = TomlValue::Table(toml::map::Map::new());
-    for layer in config.config_layer_stack.layers_low_to_high() {
-        if matches!(layer.name, ConfigLayerSource::Project { .. }) {
-            continue;
-        }
-        merge_toml_values(&mut merged, &layer.config);
-    }
-    let project_root_markers = match project_root_markers_from_config(&merged) {
-        Ok(Some(markers)) => markers,
-        Ok(None) => default_project_root_markers(),
-        Err(err) => {
-            tracing::warn!("invalid project_root_markers: {err}");
-            default_project_root_markers()
-        }
-    };
-    let project_root = find_nearest_ancestor_with_markers(
-        fs,
-        &dir,
-        project_root_markers,
-        FindUpErrorPolicy::Ignore,
-        sandbox,
-    )
-    .await?;
     let search_dirs = if let Some(root) = project_root {
         let mut dirs = Vec::new();
         let mut cursor = dir.clone();
@@ -240,6 +241,23 @@ async fn agents_md_paths(
     };
 
     let candidate_filenames = candidate_filenames(config, cwd);
+    if config.project_doc_all {
+        let mut found = Vec::new();
+        for directory in &search_dirs {
+            let root = search_dirs.first().unwrap_or(directory);
+            found.extend(
+                crate::agents_md_compat::discover_compat_docs(
+                    fs,
+                    directory,
+                    &candidate_filenames,
+                    root,
+                    sandbox,
+                )
+                .await?,
+            );
+        }
+        return Ok(found);
+    }
     let candidate_filenames = &candidate_filenames;
     let mut results = futures::stream::iter(search_dirs)
         .map(|directory| async move {
@@ -267,6 +285,34 @@ async fn agents_md_paths(
         }
     }
     Ok(found)
+}
+
+/// The nearest ancestor of `cwd` carrying a project-root marker.
+///
+/// Markers come from the config layers above the project layer, so a project
+/// cannot widen its own root and reach files outside it.
+async fn project_root(
+    config: &Config,
+    cwd: &PathUri,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<Option<PathUri>> {
+    let mut merged = TomlValue::Table(toml::map::Map::new());
+    for layer in config.config_layer_stack.layers_low_to_high() {
+        if matches!(layer.name, ConfigLayerSource::Project { .. }) {
+            continue;
+        }
+        merge_toml_values(&mut merged, &layer.config);
+    }
+    let markers = match project_root_markers_from_config(&merged) {
+        Ok(Some(markers)) => markers,
+        Ok(None) => default_project_root_markers(),
+        Err(err) => {
+            tracing::warn!("invalid project_root_markers: {err}");
+            default_project_root_markers()
+        }
+    };
+    find_nearest_ancestor_with_markers(fs, cwd, markers, FindUpErrorPolicy::Ignore, sandbox).await
 }
 
 fn candidate_filenames<'a>(config: &'a Config, cwd: &PathUri) -> Vec<&'a str> {

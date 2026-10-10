@@ -406,7 +406,22 @@ async fn repo_ancestry_without_project_marker_does_not_walk_parents() {
     fs::create_dir_all(outer.join(".agents/skills")).expect("create outer skills");
     fs::create_dir_all(cwd.join(".agents/skills")).expect("create cwd skills");
 
-    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &stack(Vec::new()), &cwd)
+    // Hermetic: disable project-root marker discovery so the test does not
+    // depend on ancestor directories of the temp dir (e.g. a real .git).
+    let mut user_config = empty_config();
+    user_config.as_table_mut().expect("config table").insert(
+        "project_root_markers".into(),
+        toml::Value::Array(Vec::new()),
+    );
+    let config_stack = stack(vec![ConfigLayerEntry::new(
+        ConfigLayerSource::User {
+            file: absolute(temp_dir.path().join("home/codex/config.toml")),
+            profile: None,
+        },
+        user_config,
+    )]);
+
+    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &config_stack, &cwd)
         .await
         .into_iter()
         .map(|root| root.path)
@@ -674,5 +689,74 @@ async fn resolved_config_and_repo_roots_preserve_order_and_dedupe_paths_not_name
             expected_skill(system_skill, "system-skill", SkillScope::System),
             expected_skill(admin_skill, "admin-skill", SkillScope::Admin),
         ]
+    );
+}
+
+/// Fork (WI-1133): `[skills].extra_project_roots` adds a root without dropping
+/// `.agents/skills`, and a value that climbs out of the directory is ignored.
+#[tokio::test]
+async fn extra_project_roots_are_added_and_confined() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let repository = absolute(temp_dir.path().join("repo"));
+    fs::create_dir_all(&repository).expect("create repo");
+    fs::write(repository.join(".git"), "gitdir: fake\n").expect("write git marker");
+    fs::create_dir_all(repository.join(".agents/skills")).expect("built-in root");
+    fs::create_dir_all(repository.join(".claude/skills")).expect("extra root");
+
+    let config = toml::toml! {
+        [skills]
+        extra_project_roots = [".claude/skills", "../outside"]
+    };
+    let config_stack = stack(vec![ConfigLayerEntry::new(
+        ConfigLayerSource::User {
+            file: repository.join("config.toml"),
+            profile: None,
+        },
+        toml::Value::Table(config),
+    )]);
+
+    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &config_stack, &repository)
+        .await
+        .into_iter()
+        .map(|root| root.path)
+        .collect::<Vec<_>>();
+
+    assert!(roots.contains(&repository.join(".agents/skills")));
+    assert!(roots.contains(&repository.join(".claude/skills")));
+    assert!(
+        roots.iter().all(|root| root.starts_with(&repository)),
+        "a root escaped the project: {roots:?}"
+    );
+}
+
+/// Fork (WI-1133): `[skills].extra_user_roots` is added beside the built-in
+/// user roots, and a value that leaves the config directory is dropped.
+#[test]
+fn extra_user_roots_are_added_and_confined() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let home_folder = absolute(temp_dir.path().join("home"));
+    let user_folder = home_folder.join("codex");
+    let config = toml::toml! {
+        [skills]
+        extra_user_roots = [".claude/skills", "../escaped"]
+    };
+    let config_stack = stack(vec![ConfigLayerEntry::new(
+        ConfigLayerSource::User {
+            file: user_folder.join("config.toml"),
+            profile: None,
+        },
+        toml::Value::Table(config),
+    )]);
+
+    let roots = roots_from_layer_stack(&config_stack, Some(&home_folder), None)
+        .into_iter()
+        .map(|root| root.path)
+        .collect::<Vec<_>>();
+
+    assert!(roots.contains(&user_folder.join("skills")));
+    assert!(roots.contains(&user_folder.join(".claude/skills")));
+    assert!(
+        !roots.iter().any(|root| root.ends_with("escaped")),
+        "a root escaped the config directory: {roots:?}"
     );
 }

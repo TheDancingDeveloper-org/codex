@@ -678,3 +678,65 @@ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing(
         (None, MAX_UNIFIED_EXEC_PROCESSES)
     );
 }
+
+#[tokio::test]
+async fn start_cwd_for_process_returns_the_spawn_directory() {
+    let (_, turn) = crate::session::tests::make_session_and_context().await;
+    let manager = UnifiedExecProcessManager::default();
+    let process_id = manager.allocate_process_id().await;
+    let cwd = PathUri::parse("file:///tmp/other-repo").expect("cwd");
+    let process = Arc::new(
+        crate::unified_exec::process_tests::remote_process(
+            codex_exec_server::WriteStatus::Accepted,
+            /*terminate_error*/ None,
+            codex_sandboxing::SandboxType::None,
+        )
+        .await,
+    );
+    manager.process_store.lock().await.processes.insert(
+        process_id,
+        ProcessEntry {
+            process,
+            plugin_metrics_sidecar: None,
+            call_id: "call".to_string(),
+            process_id,
+            cwd: cwd.clone(),
+            initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            hook_command: "bash".to_string(),
+            tty: true,
+            environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+            permissions: super::super::TerminalPermissions::for_launch(
+                turn.initial_environments
+                    .primary()
+                    .expect("turn environment"),
+                &turn,
+                super::super::TerminalSandboxSource::Native,
+                crate::sandboxing::SandboxPermissions::UseDefault,
+                /*additional_permissions*/ None,
+                /*internal_permissions*/ None,
+            ),
+            network_approval: None,
+            session: std::sync::Weak::new(),
+            last_used: Instant::now(),
+        },
+    );
+
+    assert_eq!(
+        manager.start_cwd_for_process(process_id).as_ref(),
+        Some(&cwd)
+    );
+    assert_eq!(manager.start_cwd_for_process(process_id + 1), None);
+}
+
+#[tokio::test]
+async fn start_cwd_for_process_returns_none_without_blocking_while_locked() {
+    let manager = UnifiedExecProcessManager::default();
+    let _guard = manager.process_store.lock().await;
+
+    let started = Instant::now();
+    assert_eq!(manager.start_cwd_for_process(1), None);
+    assert!(
+        started.elapsed() < Duration::from_millis(200),
+        "lookup blocked on the held lock"
+    );
+}

@@ -53,6 +53,16 @@ pub struct SkillsConfig {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<SkillConfig>,
+
+    /// Fork (WI-1133): extra user skill roots, relative to the user config
+    /// directory. The built-in roots are always loaded; these are added.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_user_roots: Vec<String>,
+
+    /// Fork (WI-1133): extra project skill roots, relative to each directory
+    /// between the project root and the working directory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_project_roots: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]

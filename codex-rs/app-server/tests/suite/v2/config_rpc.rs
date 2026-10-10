@@ -256,6 +256,7 @@ statusMessage = "Scanning file"
                 r#async: false,
                 status_message: None,
                 additional_context_limit: Some(4_096),
+                fail_closed: false,
             },
             ConfiguredHookHandler::McpTool {
                 server: "security".to_string(),
