@@ -5,3 +5,30 @@ test(pending_input_persistence::background_user_input) # timing flake: fails on 
 test(pending_input_persistence::synchronous_store) # timing flake: fails on PR #6/#12 in files the PR does not touch; green on the fork/main baseline
 test(remote_env::future_pending_environment) # timing flake: fails on PR #6/#12 in files the PR does not touch; green on the fork/main baseline
 test(hooks::permission_request_hook_allows_exec_command_without_user_approval) # timing flake: fails on PR #6/#12 in files the PR does not touch; green on the fork/main baseline
+# Fail on unmodified fork/main on gha-spot-1 (fork-ci run 38089490933, workflow_dispatch
+# with these packages forced). Environmental, not caused by a fork branch.
+test(auto_daemon_start_attaches_to_shared_server) # fails on unmodified fork/main, fork-ci run 38089490933
+test(bedrock_onboarding_leaves_a_running_daemon_untouched) # fails on unmodified fork/main, fork-ci run 38089490933
+test(daemon_worktree_start_and_fork_bind_owner_before_turn) # fails on unmodified fork/main, fork-ci run 38089490933
+test(fresh_daemon_requires_confirmation_to_disable_shared_features) # fails on unmodified fork/main, fork-ci run 38089490933
+test(incompatible_daemon_can_cancel) # fails on unmodified fork/main, fork-ci run 38089490933
+test(incompatible_daemon_can_restart_with_confirmed_settings) # fails on unmodified fork/main, fork-ci run 38089490933
+test(incompatible_daemon_can_run_embedded) # fails on unmodified fork/main, fork-ci run 38089490933
+test(managed_daemon_restarts_from_deleted_working_directory) # fails on unmodified fork/main, fork-ci run 38089490933
+test(managed_identity_survives_locale_and_timezone_changes) # fails on unmodified fork/main, fork-ci run 38089490933
+test(managed_start_keeps_updater_on_marker_mismatch_but_stops_it_for_pin) # fails on unmodified fork/main, fork-ci run 38089490933
+test(managed_start_succeeds_when_updater_record_is_invalid) # fails on unmodified fork/main, fork-ci run 38089490933
+test(managed_starts_ensure_one_updater_and_recover_a_missing_one) # fails on unmodified fork/main, fork-ci run 38089490933
+test(packaged_daemon_bootstrap_seeds_local_package) # fails on unmodified fork/main, fork-ci run 38089490933
+test(packaged_daemon_explicit_replacement_migrates_running_legacy) # fails on unmodified fork/main, fork-ci run 38089490933
+test(packaged_daemon_restart_seeds_local_package) # fails on unmodified fork/main, fork-ci run 38089490933
+test(packaged_daemon_start_and_explicit_replacement) # fails on unmodified fork/main, fork-ci run 38089490933
+test(restart_applies_saved_updater_preference) # fails on unmodified fork/main, fork-ci run 38089490933
+test(stopped_daemon_requires_confirmation_to_disable_persisted_features) # fails on unmodified fork/main, fork-ci run 38089490933
+test(wall_clock_shift_keeps_server_and_updater_managed) # fails on unmodified fork/main, fork-ci run 38089490933
+test(remote_process_preserves_empty_workspace_roots) # fails on unmodified fork/main, fork-ci run 38089490933
+test(shell_snapshot::shell_snapshot_concurrent_replays_keep_independent_readers::blocked_descriptor_path) # fails on unmodified fork/main, fork-ci run 38089490933
+test(shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_pipe_recovery) # fails on unmodified fork/main, fork-ci run 38089490933
+test(shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_tty_recovery) # fails on unmodified fork/main, fork-ci run 38089490933
+test(shell_snapshot_v2_filters_profile_exports_and_stays_in_memory::remote_sandbox) # fails on unmodified fork/main, fork-ci run 38089490933
+
