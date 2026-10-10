@@ -932,6 +932,10 @@ pub struct Config {
     /// Additional filenames to try when looking for project-level docs.
     pub project_doc_fallback_filenames: Vec<String>,
 
+    /// Fork (WI-1131): load `~/.claude/CLAUDE.md` and `~/.claude/rules/*.md`
+    /// into the global user-instructions snapshot. Off unless the config sets it.
+    pub claude_compat_instructions: bool,
+
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,
 
@@ -4391,6 +4395,7 @@ impl Config {
                     }
                 })
                 .collect(),
+            claude_compat_instructions: cfg.claude_compat_instructions.unwrap_or(false),
             tool_output_token_limit: cfg.tool_output_token_limit,
             agents_enabled,
             agent_max_threads,

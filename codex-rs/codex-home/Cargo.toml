@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 codex-extension-api = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
+dirs = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
