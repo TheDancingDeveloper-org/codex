@@ -643,6 +643,16 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
                     .to_string(),
             )),
         ),
+        (
+            "output_schema".to_string(),
+            // No type: a caller-supplied JSON schema is itself any JSON value.
+            JsonSchema {
+                description: Some(
+                    "JSON schema the spawned agent's first turn must satisfy as its final output. Omit for an unconstrained reply.".to_string(),
+                ),
+                ..Default::default()
+            },
+        ),
     ])
 }
 
@@ -679,6 +689,16 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
                 "Reasoning effort override for the new agent. Omit to inherit the parent effort."
                     .to_string(),
             )),
+        ),
+        (
+            "output_schema".to_string(),
+            // No type: a caller-supplied JSON schema is itself any JSON value.
+            JsonSchema {
+                description: Some(
+                    "JSON schema the spawned agent's first turn must satisfy as its final output. Omit for an unconstrained reply.".to_string(),
+                ),
+                ..Default::default()
+            },
         ),
     ])
 }
