@@ -4974,6 +4974,7 @@ async fn pre_tool_use_merges_hooks_json_and_config_toml() -> Result<()> {
         "tool_use_id": call_id,
         "tool_input": {
             "command": command,
+            "workdir": test.cwd_path().to_string_lossy(),
         },
     })];
     assert_eq!(expected_hook_inputs, json_hook_inputs);
