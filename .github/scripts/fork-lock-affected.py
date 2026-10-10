@@ -12,9 +12,28 @@ import json
 import sys
 
 
+# cargo metadata records resolved edges on resolve.nodes[].deps, not on the
+# declared packages[].dependencies list (that one has name/req/path and no
+# package id). None is cargo's kind for a normal dependency.
+KEPT_KINDS = (None, "dev", "build")
+
+
+def edges(meta):
+    """package id -> resolved package ids it depends on (normal, dev, build)."""
+    graph = {}
+    for node in (meta.get("resolve") or {}).get("nodes", []):
+        deps = set()
+        for dep in node.get("deps", []):
+            kinds = [entry.get("kind") for entry in dep.get("dep_kinds", [])]
+            if not kinds or any(kind in KEPT_KINDS for kind in kinds):
+                deps.add(dep["pkg"])
+        graph[node["id"]] = deps
+    return graph
+
+
 def reachable(meta):
     """name -> frozenset of resolved package ids reachable from that member."""
-    by_id = {package["id"]: package for package in meta["packages"]}
+    graph = edges(meta)
     members = [
         (package["id"], package["name"])
         for package in meta["packages"]
@@ -25,14 +44,12 @@ def reachable(meta):
     def walk(package_id, stack):
         if package_id in cache:
             return cache[package_id]
-        if package_id in stack or package_id not in by_id:
+        if package_id in stack or package_id not in graph:
             return frozenset()
         stack.add(package_id)
         found = {package_id}
-        for dep in by_id[package_id].get("dependencies", []):
-            dep_id = dep.get("pkg") or dep.get("id")
-            if dep_id:
-                found |= walk(dep_id, stack)
+        for dep_id in graph[package_id]:
+            found |= walk(dep_id, stack)
         stack.remove(package_id)
         cache[package_id] = frozenset(found)
         return cache[package_id]
