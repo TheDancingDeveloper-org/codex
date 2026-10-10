@@ -158,7 +158,12 @@ jobs:
               # every later cargo invocation would compile against it.
               trap 'mv /tmp/Cargo.lock.head Cargo.lock' EXIT
               git show "$base:codex-rs/Cargo.lock" > Cargo.lock
-              cargo metadata --format-version 1 --locked > "$base_meta"
+              # Not --locked. The base lock describes the base manifests, and
+              # reading it against HEAD's manifests (a new edge on an existing
+              # package) makes cargo 1.95 call the lock stale even though the
+              # resolve is identical. --offline keeps it from moving a version;
+              # the copy above is discarded either way.
+              cargo metadata --format-version 1 --offline > "$base_meta"
               mv /tmp/Cargo.lock.head Cargo.lock
               trap - EXIT
               mapfile -t locked < <(python3 "${GITHUB_WORKSPACE}/.github/scripts/fork-lock-affected.py" "$base_meta" "$head_meta")
