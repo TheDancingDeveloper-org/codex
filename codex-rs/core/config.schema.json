@@ -7839,6 +7839,11 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "project_doc_mode": {
+      "default": null,
+      "description": "Fork (WI-1132): how a directory's project docs are chosen. `first` (the default) keeps the upstream behaviour of the first matching filename per directory. `all` loads every matching filename, plus `.claude/rules/*.md` in sorted order, and expands `@path` imports confined to the project root. An unrecognised value falls back to `first`.",
+      "type": "string"
+    },
     "project_root_markers": {
       "default": null,
       "description": "Markers used to detect the project root when searching parent directories for `.codex` folders. Defaults to [\".git\"] when unset.",
