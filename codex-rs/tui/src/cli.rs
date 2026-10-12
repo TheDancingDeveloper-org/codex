@@ -59,6 +59,11 @@ pub struct Cli {
     #[clap(skip)]
     pub fork_session_id: Option<String>,
 
+    /// Id for a newly started thread. Any UUID version is accepted. Rejected
+    /// with resume, fork, and ephemeral sessions.
+    #[arg(long = "session-id", value_name = "UUID")]
+    pub session_id: Option<String>,
+
     /// Internal: show all sessions (disables cwd filtering and shows CWD column).
     #[clap(skip)]
     pub fork_show_all: bool,

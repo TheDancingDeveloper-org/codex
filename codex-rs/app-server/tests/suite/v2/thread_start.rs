@@ -1148,6 +1148,109 @@ async fn thread_start_ephemeral_remains_pathless() -> Result<()> {
     Ok(())
 }
 
+const CALLER_THREAD_ID_V4: &str = "11111111-1111-4111-8111-111111111111";
+
+async fn initialized_server(codex_home: &Path) -> Result<TestAppServer> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    create_config_toml_without_approval_policy(codex_home, &server.uri())?;
+    TestAppServer::builder()
+        .with_codex_home(codex_home)
+        .build_initialized()
+        .await
+}
+
+async fn thread_start_error(
+    mcp: &mut TestAppServer,
+    params: ThreadStartParams,
+) -> Result<JSONRPCError> {
+    let req_id = mcp.send_thread_start_request_with_auto_env(params).await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(req_id)),
+    )
+    .await?
+}
+
+#[tokio::test]
+async fn thread_start_honors_caller_thread_id() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut mcp = initialized_server(codex_home.path()).await?;
+
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            thread_id: Some(CALLER_THREAD_ID_V4.to_string()),
+            ..Default::default()
+        })
+        .await?;
+    assert_eq!(thread.id, CALLER_THREAD_ID_V4);
+    let thread_path = thread.path.expect("caller-chosen threads are persisted");
+    assert!(
+        thread_path.to_string_lossy().contains(CALLER_THREAD_ID_V4),
+        "rollout path should be keyed by the caller thread id: {}",
+        thread_path.display()
+    );
+
+    let duplicate = thread_start_error(
+        &mut mcp,
+        ThreadStartParams {
+            thread_id: Some(CALLER_THREAD_ID_V4.to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+    assert_eq!(duplicate.error.code, INVALID_REQUEST_ERROR_CODE);
+    assert!(
+        duplicate.error.message.contains("thread already exists"),
+        "unexpected duplicate error: {}",
+        duplicate.error.message
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_start_rejects_invalid_thread_id() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut mcp = initialized_server(codex_home.path()).await?;
+    let error = thread_start_error(
+        &mut mcp,
+        ThreadStartParams {
+            thread_id: Some("not-a-uuid".to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+    assert_eq!(error.error.code, INVALID_REQUEST_ERROR_CODE);
+    assert!(
+        error.error.message.contains("invalid threadId"),
+        "unexpected error: {}",
+        error.error.message
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_start_rejects_caller_thread_id_for_ephemeral_threads() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut mcp = initialized_server(codex_home.path()).await?;
+    let error = thread_start_error(
+        &mut mcp,
+        ThreadStartParams {
+            thread_id: Some(CALLER_THREAD_ID_V4.to_string()),
+            ephemeral: Some(true),
+            ..Default::default()
+        },
+    )
+    .await?;
+    assert_eq!(error.error.code, INVALID_REQUEST_ERROR_CODE);
+    assert!(
+        error.error.message.contains("ephemeral"),
+        "unexpected error: {}",
+        error.error.message
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn thread_start_fails_when_required_mcp_server_fails_to_initialize() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;

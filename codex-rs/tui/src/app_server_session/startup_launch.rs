@@ -10,6 +10,10 @@ use codex_config::LoaderOverrides;
 pub(crate) struct StartupLaunchChoices {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<serde_json::Value>,
+    /// Caller-chosen id for the initial startup thread. Assigned after
+    /// `from_launch`; `configure` writes it onto `thread/start` before any
+    /// profile early return.
+    pub(crate) session_id: Option<String>,
     provider: Option<String>,
     selected_profile: bool,
 }
@@ -47,11 +51,13 @@ impl StartupLaunchChoices {
                     .and_then(toml::Value::as_str)
                     .map(str::to_owned)
             }),
+            session_id: None,
             selected_profile: false,
         }
     }
 
     pub(super) fn configure(self, params: &mut ThreadStartParams) {
+        params.thread_id = self.session_id;
         if self.selected_profile {
             params.model_provider = self.provider.or(params.model_provider.take());
             return;
