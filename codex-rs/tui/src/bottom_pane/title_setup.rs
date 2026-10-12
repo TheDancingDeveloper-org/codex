@@ -50,6 +50,11 @@ pub(crate) enum TerminalTitleItem {
     /// Compact runtime run-state text.
     #[strum(to_string = "run-state", serialize = "status")]
     Status,
+    /// Whole-title agent state for a session manager: `codex: ready|working|awaiting approval`.
+    ///
+    /// Unlike `run-state`, this item is the entire title. It does not blink and
+    /// does not schedule a refresh while the session is idle.
+    AgentState,
     /// Current thread name, omitted when unnamed.
     ThreadName,
     /// Current thread title (if available).
@@ -108,6 +113,9 @@ impl TerminalTitleItem {
             TerminalTitleItem::Status => {
                 "Compact session run-state text (Ready, Working, Thinking)"
             }
+            TerminalTitleItem::AgentState => {
+                "Stable agent state for a session manager (codex: ready, working, or awaiting approval)"
+            }
             TerminalTitleItem::ThreadName => "Current thread name (omitted when unnamed)",
             TerminalTitleItem::Thread => "Current thread title, or thread identifier when unnamed",
             TerminalTitleItem::GitBranch => "Current Git branch (omitted when unavailable)",
@@ -154,6 +162,7 @@ impl TerminalTitleItem {
             TerminalTitleItem::CurrentDir => Some(StatusSurfacePreviewItem::CurrentDir),
             TerminalTitleItem::Spinner => None,
             TerminalTitleItem::Status => Some(StatusSurfacePreviewItem::Status),
+            TerminalTitleItem::AgentState => Some(StatusSurfacePreviewItem::AgentState),
             TerminalTitleItem::ThreadName => Some(StatusSurfacePreviewItem::ThreadName),
             TerminalTitleItem::Thread => Some(StatusSurfacePreviewItem::ThreadTitle),
             TerminalTitleItem::GitBranch => Some(StatusSurfacePreviewItem::GitBranch),
