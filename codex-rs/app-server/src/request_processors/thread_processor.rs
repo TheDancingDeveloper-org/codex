@@ -44,11 +44,12 @@ async fn stage_pending_thread_metadata(
     thread_store: &dyn ThreadStore,
     patch: StoreThreadMetadataPatch,
     operation: &'static str,
+    caller_thread_id: Option<ThreadId>,
 ) -> Result<Option<ThreadId>, JSONRPCErrorError> {
     if patch.is_empty() {
-        return Ok(None);
+        return Ok(caller_thread_id);
     }
-    let thread_id = thread_manager.reserve_thread_id();
+    let thread_id = caller_thread_id.unwrap_or_else(|| thread_manager.reserve_thread_id());
     thread_store
         .stage_pending_thread_metadata(thread_id, patch)
         .await
@@ -1151,6 +1152,7 @@ impl ThreadRequestProcessor {
             dynamic_tools,
             selected_capability_roots,
             mock_experimental_field: _mock_experimental_field,
+            thread_id,
             experimental_raw_events,
             personality,
             multi_agent_mode: _multi_agent_mode,
@@ -1251,6 +1253,7 @@ impl ThreadRequestProcessor {
                 service_name,
                 allow_provider_model_fallback,
                 experimental_raw_events,
+                thread_id,
                 request_trace,
                 initial_config_warnings,
             )
@@ -1333,6 +1336,7 @@ impl ThreadRequestProcessor {
         service_name: Option<String>,
         allow_provider_model_fallback: bool,
         experimental_raw_events: bool,
+        caller_thread_id: Option<String>,
         request_trace: Option<W3cTraceContext>,
         initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
     ) -> Result<(), JSONRPCErrorError> {
@@ -1346,6 +1350,79 @@ impl ThreadRequestProcessor {
             return Err(invalid_request(
                 "daybreakEnabled is not supported for ephemeral threads",
             ));
+        }
+        if config.ephemeral && caller_thread_id.is_some() {
+            return Err(invalid_request(
+                "threadId is not supported for ephemeral threads",
+            ));
+        }
+        let caller_thread_id = match caller_thread_id.as_deref() {
+            Some(value) => Some(
+                ThreadId::from_string(value)
+                    .map_err(|_| invalid_request(format!("invalid threadId: {value}")))?,
+            ),
+            None => None,
+        };
+        if let Some(thread_id) = caller_thread_id {
+            if listener_task_context
+                .thread_manager
+                .get_thread(thread_id)
+                .await
+                .is_ok()
+            {
+                return Err(invalid_request(format!(
+                    "thread already exists: {thread_id}"
+                )));
+            }
+            match thread_store
+                .read_thread(StoreReadThreadParams {
+                    thread_id,
+                    include_archived: true,
+                    include_history: false,
+                })
+                .await
+            {
+                Ok(_) => {
+                    return Err(invalid_request(format!(
+                        "thread already exists: {thread_id}"
+                    )));
+                }
+                Err(ThreadStoreError::ThreadNotFound { .. }) => {}
+                Err(ThreadStoreError::InvalidRequest { message })
+                    if message == format!("no rollout found for thread id {thread_id}") => {}
+                Err(error) => {
+                    return Err(internal_error(format!(
+                        "failed to check thread {thread_id}: {error}"
+                    )));
+                }
+            }
+            let codex_home = listener_task_context.codex_home.as_path();
+            let thread_id_str = thread_id.to_string();
+            let existing_rollout =
+                codex_rollout::find_thread_path_by_id_str(codex_home, thread_id_str.as_str(), None)
+                    .await
+                    .map_err(|error| {
+                        internal_error(format!("failed to check thread {thread_id}: {error}"))
+                    })?;
+            if existing_rollout.is_some() {
+                return Err(invalid_request(format!(
+                    "thread already exists: {thread_id}"
+                )));
+            }
+            let archived_rollout = codex_rollout::find_archived_thread_path_by_id_str(
+                codex_home,
+                thread_id_str.as_str(),
+                None,
+            )
+            .await
+            .map_err(|error| {
+                internal_error(format!("failed to check thread {thread_id}: {error}"))
+            })?;
+            if archived_rollout.is_some() {
+                return Err(invalid_request(format!(
+                    "thread already exists: {thread_id}"
+                )));
+            }
         }
         // Project-local config can launch host processes, so only the effective
         // permissions after managed constraints can imply project trust.
@@ -1480,11 +1557,14 @@ impl ThreadRequestProcessor {
                     ..Default::default()
                 },
                 "thread/start",
+                caller_thread_id,
             )
             .await?
         };
-        let thread_id = reserved_thread_id
-            .unwrap_or_else(|| listener_task_context.thread_manager.reserve_thread_id());
+        let thread_id = reserved_thread_id.unwrap_or_else(|| {
+            caller_thread_id
+                .unwrap_or_else(|| listener_task_context.thread_manager.reserve_thread_id())
+        });
         start_options.reserved_thread_id = Some(thread_id);
         // Startup can prewarm the Responses socket before start_thread returns.
         // Register the creating client first so that handshake can request attestation.
@@ -5181,6 +5261,7 @@ impl ThreadRequestProcessor {
                     ..Default::default()
                 },
                 "thread/fork",
+                None,
             )
             .await?
         };

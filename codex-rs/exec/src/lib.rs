@@ -234,6 +234,7 @@ struct ExecRunArgs {
     stderr_with_ansi: bool,
     thread_source: ThreadSource,
     cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
+    session_id: Option<String>,
 }
 
 struct ManagedExecWorktree {
@@ -272,6 +273,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         cyber_access_program,
         skip_git_repo_check,
         ephemeral,
+        session_id,
         ignore_user_config,
         ignore_rules,
         color,
@@ -325,6 +327,15 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             }
             Some(ExecCommand::Fork(_)) | None => {}
         }
+    }
+    if session_id.is_some()
+        && (ephemeral
+            || matches!(
+                command.as_ref(),
+                Some(ExecCommand::Resume(_) | ExecCommand::Fork(_))
+            ))
+    {
+        anyhow::bail!("--session-id is only supported when starting a new persisted thread");
     }
 
     let (_stdout_with_ansi, stderr_with_ansi) = match color {
@@ -771,6 +782,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         stderr_with_ansi,
         thread_source: thread_source.map(Into::into).unwrap_or(ThreadSource::User),
         cyber_access_program: cyber_access_program.map(Into::into),
+        session_id,
     })
     .instrument(exec_span)
     .await
@@ -873,6 +885,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         stderr_with_ansi,
         thread_source,
         cyber_access_program,
+        session_id,
     } = args;
 
     if config.features.enabled(Feature::CliDaybreak)
@@ -1055,7 +1068,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 .unwrap_or(false);
             (session_configured.thread_id, session_configured)
         } else {
-            let response = start_thread(&client, &mut request_ids, &config, &thread_source)
+            let response = start_thread(&client, &mut request_ids, &config, &thread_source, None)
                 .await
                 .map_err(anyhow::Error::msg)?;
             let session_configured =
@@ -1151,9 +1164,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             .unwrap_or(false);
         (session_configured.thread_id, session_configured)
     } else {
-        let response = start_thread(&client, &mut request_ids, &config, &thread_source)
-            .await
-            .map_err(anyhow::Error::msg)?;
+        let response = start_thread(
+            &client,
+            &mut request_ids,
+            &config,
+            &thread_source,
+            session_id.as_deref(),
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
         let session_configured = session_configured_from_thread_start_response(&response, &config)
             .map_err(anyhow::Error::msg)?;
         (session_configured.thread_id, session_configured)
@@ -1411,8 +1430,10 @@ async fn start_thread(
     request_ids: &mut RequestIdSequencer,
     config: &Config,
     thread_source: &ThreadSource,
+    session_id: Option<&str>,
 ) -> Result<ThreadStartResponse, String> {
     let mut params = thread_start_params_from_config(config, thread_source);
+    params.thread_id = session_id.map(str::to_owned);
     loop {
         match client
             .request_typed(ClientRequest::ThreadStart {
