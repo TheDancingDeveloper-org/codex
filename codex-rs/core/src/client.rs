@@ -41,6 +41,7 @@ use async_channel::Sender;
 use codex_api::AgentIdentityTelemetry;
 use codex_api::ApiError;
 use codex_api::AuthProvider;
+use codex_api::ChatClient as ApiChatClient;
 use codex_api::Compression;
 use codex_api::MemoriesClient as ApiMemoriesClient;
 use codex_api::MemorySummarizeInput as ApiMemorySummarizeInput;
@@ -1835,6 +1836,79 @@ impl ModelClientSession {
         }
     }
 
+    /// Streams a turn via Chat Completions (`wire_api = "chat"`, fork-only,
+    /// WI-1286). Tool calls come back under their flattened chat names and are
+    /// restored to the items the rest of Codex expects before mapping.
+    async fn stream_chat_completions(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        let client_setup = self
+            .client
+            .current_client_setup(ClientRouting::Workspace)
+            .await?;
+        tracing::Span::current().record("api.path", "/chat/completions");
+        let transport = self.client.build_api_transport(
+            &client_setup.api_provider,
+            "/chat/completions",
+            client_setup.redirect_policy,
+        )?;
+        let request_auth_context = AuthRequestTelemetryContext::new(
+            client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+            client_setup.api_auth.as_ref(),
+            client_setup.agent_identity_telemetry.clone(),
+            PendingUnauthorizedRetry::default(),
+        );
+        let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+            session_telemetry,
+            request_auth_context,
+            RequestRouteTelemetry::for_endpoint("/chat/completions"),
+            self.client.state.auth_env_telemetry.clone(),
+        );
+        let (body, tool_map) = crate::chat_request::build_chat_request(&model_info.slug, prompt);
+        let interceptors = crate::model_request::prepare(
+            &self.client.request_contributors,
+            &self.client.state.thread_id.to_string(),
+            &model_info.slug,
+            codex_extension_api::ModelRequestKind::Generation,
+            &mut None,
+        );
+        let inference_trace_attempt = inference_trace.start_attempt();
+        let client =
+            ApiChatClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+        let mut api_stream = match client.stream(&body, http::HeaderMap::new()).await {
+            Ok(stream) => stream,
+            Err(err) => return Err(self.client.state.provider.map_api_error(err)),
+        };
+        let (tx, rx_event) = mpsc::channel(1600);
+        let mut upstream = std::mem::replace(&mut api_stream.rx_event, rx_event);
+        tokio::spawn(async move {
+            while let Some(event) = upstream.recv().await {
+                let event = event.map(|event| match event {
+                    codex_api::ResponseEvent::OutputItemDone(item) => {
+                        codex_api::ResponseEvent::OutputItemDone(tool_map.restore(item))
+                    }
+                    other => other,
+                });
+                if tx.send(event).await.is_err() {
+                    return;
+                }
+            }
+        });
+        let (stream, _) = map_response_stream(
+            api_stream,
+            session_telemetry.clone(),
+            inference_trace_attempt,
+            Arc::clone(&self.client.state.provider),
+            interceptors,
+        );
+        Ok(stream)
+    }
+
     /// Streams a turn via the Responses API over WebSocket transport.
     #[allow(clippy::too_many_arguments)]
     #[instrument(
@@ -2284,12 +2358,10 @@ impl ModelClientSession {
                 )
                 .await
             }
-            // The Chat Completions request and SSE parser land in the next step.
-            WireApi::Chat => Err(codex_protocol::error::CodexErrorDetails::Stream(
-                "wire_api = \"chat\" is accepted but the chat completions client is not wired yet"
-                    .to_string(),
-            )
-            .into()),
+            WireApi::Chat => {
+                self.stream_chat_completions(prompt, model_info, session_telemetry, inference_trace)
+                    .await
+            }
         }
     }
 
