@@ -1997,6 +1997,8 @@ async fn refresh_runtime_config_refreshes_hooks() -> anyhow::Result<()> {
                     r#async: false,
                     status_message: None,
                     additional_context_limit: None,
+                    // serde default for failClosed: unset means fail open.
+                    fail_closed: false,
                 }],
             },
         };

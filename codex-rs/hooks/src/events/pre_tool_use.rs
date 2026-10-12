@@ -292,6 +292,24 @@ fn parse_completed(
         },
     }
 
+    // `failClosed` turns every failure into a block the model sees. A handler
+    // without the flag keeps failing open, so the tool still runs.
+    if handler.fail_closed && handler.can_apply_control_effects() && status == HookRunStatus::Failed
+    {
+        status = HookRunStatus::Blocked;
+        should_block = true;
+        let reason = entries
+            .iter()
+            .find(|entry| entry.kind == HookOutputEntryKind::Error)
+            .map(|entry| format!("hook failed closed: {}", entry.text))
+            .unwrap_or_else(|| "hook failed closed".to_string());
+        block_reason = Some(reason.clone());
+        entries.push(HookOutputEntry {
+            kind: HookOutputEntryKind::Feedback,
+            text: reason,
+        });
+    }
+
     let completed = HookCompletedEvent {
         turn_id,
         run: dispatcher::completed_summary(handler, &run_result, status, entries),
@@ -332,6 +350,7 @@ mod tests {
 
     use super::PreToolUseHandlerData;
     use super::command_input_json;
+    use super::dispatcher;
     use super::latest_updated_input;
     use super::parse_completed;
     use super::preview;
@@ -779,6 +798,7 @@ mod tests {
             timeout_sec: 5,
             status_message: None,
             additional_context_limit: Default::default(),
+            fail_closed: false,
             source_path: test_path_buf("/tmp/hooks.json").abs().into(),
             source: codex_protocol::protocol::HookSource::User,
             display_order: 0,
@@ -799,6 +819,137 @@ mod tests {
             stdout: stdout.to_string(),
             stderr: stderr.to_string(),
             error: None,
+        }
+    }
+
+    fn run_result_error(error: &str) -> HandlerRunResult {
+        HandlerRunResult {
+            started_at: 1,
+            completed_at: 2,
+            duration_ms: 1,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            error: Some(error.to_string()),
+        }
+    }
+
+    fn assert_failed_open(parsed: &dispatcher::ParsedHandler<PreToolUseHandlerData>) {
+        assert!(!parsed.data.should_block);
+        assert_eq!(parsed.data.block_reason, None);
+        assert_eq!(parsed.completed.run.status, HookRunStatus::Failed);
+    }
+
+    fn assert_failed_closed(
+        parsed: &dispatcher::ParsedHandler<PreToolUseHandlerData>,
+        reason_contains: &str,
+    ) {
+        assert!(parsed.data.should_block);
+        let reason = parsed.data.block_reason.as_deref().unwrap_or_default();
+        assert!(
+            reason.contains(reason_contains),
+            "block reason {reason:?} should mention {reason_contains:?}"
+        );
+        assert!(reason.starts_with("hook failed closed: "));
+        assert_eq!(parsed.completed.run.status, HookRunStatus::Blocked);
+        assert!(
+            parsed
+                .completed
+                .run
+                .entries
+                .iter()
+                .any(|entry| entry.kind == HookOutputEntryKind::Feedback
+                    && entry.text.contains(reason_contains))
+        );
+    }
+
+    #[test]
+    fn fail_closed_blocks_nonzero_exit_other_than_two() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(&handler, run_result(Some(1), "", "boom"), None);
+        assert_failed_closed(&parsed, "hook exited with code 1");
+    }
+
+    #[test]
+    fn fail_closed_blocks_exit_two_without_a_reason() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(&handler, run_result(Some(2), "", "  "), None);
+        assert_failed_closed(&parsed, "did not write a blocking reason");
+    }
+
+    #[test]
+    fn fail_closed_blocks_missing_status_code() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(&handler, run_result(None, "", ""), None);
+        assert_failed_closed(&parsed, "exited without a status code");
+    }
+
+    #[test]
+    fn fail_closed_blocks_spawn_failure() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(
+            &handler,
+            run_result_error("No such file or directory (os error 2)"),
+            None,
+        );
+        assert_failed_closed(&parsed, "No such file or directory");
+    }
+
+    #[test]
+    fn fail_closed_blocks_timeout() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(&handler, run_result_error("hook timed out after 5s"), None);
+        assert_failed_closed(&parsed, "timed out");
+    }
+
+    #[test]
+    fn fail_closed_blocks_crash_or_signal() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(
+            &handler,
+            run_result_error("wait_error: process terminated by signal"),
+            None,
+        );
+        assert_failed_closed(&parsed, "terminated by signal");
+    }
+
+    #[test]
+    fn fail_closed_blocks_invalid_json() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(&handler, run_result(Some(0), "{not json", ""), None);
+        assert_failed_closed(&parsed, "invalid pre-tool-use JSON");
+    }
+
+    #[test]
+    fn fail_closed_blocks_unreadable_command_output() {
+        let mut handler = handler();
+        handler.fail_closed = true;
+        let parsed = parse_completed(
+            &handler,
+            run_result_error("stream did not contain valid UTF-8"),
+            None,
+        );
+        assert_failed_closed(&parsed, "valid UTF-8");
+    }
+
+    #[test]
+    fn handler_without_fail_closed_still_fails_open() {
+        for result in [
+            run_result(Some(1), "", ""),
+            run_result(Some(2), "", ""),
+            run_result(None, "", ""),
+            run_result(Some(0), "{not json", ""),
+            run_result_error("No such file or directory (os error 2)"),
+            run_result_error("hook timed out after 5s"),
+        ] {
+            assert_failed_open(&parse_completed(&handler(), result, None));
         }
     }
 

@@ -632,9 +632,10 @@ async fn exec_command_pre_tool_use_payload_resolves_workdir() {
 }
 
 #[tokio::test]
-async fn exec_command_pre_tool_use_payload_skips_write_stdin() {
+async fn write_stdin_pre_tool_use_payload_reviews_nonempty_input_as_bash() {
     let payload = ToolPayload::Function {
-        arguments: serde_json::json!({ "chars": "echo hi" }).to_string(),
+        arguments: serde_json::json!({ "session_id": 1, "chars": "git reset --hard\n" })
+            .to_string(),
     };
     let (session, turn) = make_session_and_context().await;
     let turn = Arc::new(turn);
@@ -648,6 +649,34 @@ async fn exec_command_pre_tool_use_payload_skips_write_stdin() {
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
             call_id: "call-44".to_string(),
+            tool_name: codex_tools::ToolName::plain("write_stdin"),
+            source: crate::tools::context::ToolCallSource::Direct,
+            payload,
+        }),
+        Some(crate::tools::registry::PreToolUsePayload {
+            tool_name: HookToolName::bash(),
+            tool_input: serde_json::json!({ "command": "git reset --hard\n", "workdir": null }),
+        })
+    );
+}
+
+#[tokio::test]
+async fn write_stdin_pre_tool_use_payload_skips_empty_poll() {
+    let payload = ToolPayload::Function {
+        arguments: serde_json::json!({ "session_id": 1, "chars": "" }).to_string(),
+    };
+    let (session, turn) = make_session_and_context().await;
+    let turn = Arc::new(turn);
+    let handler = WriteStdinHandler;
+
+    assert_eq!(
+        handler.pre_tool_use_payload(&ToolInvocation {
+            session: session.into(),
+            step_context: StepContext::for_test(Arc::clone(&turn)),
+            turn,
+            cancellation_token: tokio_util::sync::CancellationToken::new(),
+            tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
+            call_id: "call-45".to_string(),
             tool_name: codex_tools::ToolName::plain("write_stdin"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,

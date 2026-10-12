@@ -182,7 +182,7 @@ mod tests {
     use codex_core::thread_store_from_config;
     use codex_exec_server::EnvironmentManager;
     use codex_extension_api::NoopExtensionEventSink;
-    use codex_home::CodexHomeUserInstructionsProvider;
+    use codex_home::user_instructions_provider;
     use codex_login::AuthManager;
     use codex_login::CodexAuth;
     use codex_protocol::protocol::SessionSource;
@@ -490,9 +490,11 @@ enabled = false
                     queue_service: None,
                     turn_start_admission: None,
                 }),
-                Arc::new(CodexHomeUserInstructionsProvider::new(
+                user_instructions_provider(
                     good_config.codex_home.clone(),
-                )),
+                    good_config.claude_compat_instructions,
+                    good_config.project_doc_max_bytes,
+                ),
                 /*analytics_events_client*/ None,
                 codex_core::passthrough_image_store(),
                 Arc::clone(&thread_store),

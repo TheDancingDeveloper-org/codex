@@ -2110,6 +2110,11 @@
               "default": null,
               "type": "string"
             },
+            "failClosed": {
+              "default": false,
+              "description": "When true, a failure of this command hook blocks the tool instead of failing open. Defaults to false, so existing handlers are unchanged. Only command hooks carry this field; MCP tool hooks always fail open. It also has no effect on a hook that never runs, such as an untrusted user or project hook, or when the hooks feature is disabled. An async handler that sets it runs synchronously, because a block can only be applied before the tool starts.",
+              "type": "boolean"
+            },
             "statusMessage": {
               "default": null,
               "type": "string"
@@ -4266,6 +4271,20 @@
         "config": {
           "items": {
             "$ref": "#/definitions/SkillConfig"
+          },
+          "type": "array"
+        },
+        "extra_project_roots": {
+          "description": "Fork (WI-1133): extra project skill roots, relative to each directory between the project root and the working directory.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "extra_user_roots": {
+          "description": "Fork (WI-1133): extra user skill roots, relative to the user config directory. The built-in roots are always loaded; these are added.",
+          "items": {
+            "type": "string"
           },
           "type": "array"
         },
@@ -6850,6 +6869,11 @@
       "description": "When `true`, checks for Codex updates on startup and surfaces update prompts. Set to `false` only if your Codex updates are centrally managed. Defaults to `true`.",
       "type": "boolean"
     },
+    "claude_compat_instructions": {
+      "default": null,
+      "description": "Fork (WI-1131): also load the user's global Claude Code instructions (`~/.claude/CLAUDE.md` and `~/.claude/rules/*.md`) into the user instructions snapshot. Off by default, so upstream behaviour is unchanged unless a config sets it.",
+      "type": "boolean"
+    },
     "cli_auth_credentials_store": {
       "allOf": [
         {
@@ -7814,6 +7838,11 @@
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"
+    },
+    "project_doc_mode": {
+      "default": null,
+      "description": "Fork (WI-1132): how a directory's project docs are chosen. `first` (the default) keeps the upstream behaviour of the first matching filename per directory. `all` loads every matching filename, plus `.claude/rules/*.md` in sorted order, and expands `@path` imports confined to the project root. An unrecognised value falls back to `first`.",
+      "type": "string"
     },
     "project_root_markers": {
       "default": null,

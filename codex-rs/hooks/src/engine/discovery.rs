@@ -77,6 +77,7 @@ struct NormalizedHandler {
     timeout_sec: u64,
     status_message: Option<String>,
     additional_context_limit: Option<usize>,
+    fail_closed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -511,6 +512,7 @@ fn append_matcher_groups(
                     r#async,
                     status_message,
                     additional_context_limit,
+                    fail_closed,
                 } => {
                     let command = if cfg!(windows) {
                         command_windows.unwrap_or(command)
@@ -538,6 +540,19 @@ fn append_matcher_groups(
                             source.path.display()
                         ));
                     }
+                    // `failClosed` only takes effect on a synchronous handler, so an
+                    // async handler that asks for it runs synchronously. Skipping it
+                    // would let the tool run with no guard at all.
+                    let runs_async = if runs_async && fail_closed {
+                        warnings.push(format!(
+                            "running async {} hook synchronously in {} because failClosed is set",
+                            hook_event_name_label(event_name),
+                            source.path.display()
+                        ));
+                        false
+                    } else {
+                        runs_async
+                    };
                     let additional_context_limit = if matches!(
                         event_name,
                         codex_protocol::protocol::HookEventName::PreToolUse
@@ -565,6 +580,7 @@ fn append_matcher_groups(
                         r#async,
                         status_message: status_message.clone(),
                         additional_context_limit: normalized_additional_context_limit,
+                        fail_closed,
                     };
                     let command = source.env.iter().fold(command, |command, (key, value)| {
                         command.replace(&format!("${{{key}}}"), value)
@@ -579,6 +595,7 @@ fn append_matcher_groups(
                         timeout_sec,
                         status_message,
                         additional_context_limit,
+                        fail_closed,
                     }
                 }
                 HookHandlerConfig::McpTool {
@@ -632,6 +649,7 @@ fn append_matcher_groups(
                         timeout_sec,
                         status_message,
                         additional_context_limit: None,
+                        fail_closed: false,
                     }
                 }
                 HookHandlerConfig::Prompt {} => {
@@ -662,6 +680,7 @@ fn append_matcher_groups(
                 timeout_sec,
                 status_message,
                 additional_context_limit,
+                fail_closed,
             } = normalized;
             let current_hash = hook_hash(event_name, matcher, &group, &config);
             let key = crate::hook_key(&source.key_source, event_name, group_index, handler_index);
@@ -728,6 +747,7 @@ fn append_matcher_groups(
                     additional_context_limit: AdditionalContextLimit::from_config(
                         additional_context_limit,
                     ),
+                    fail_closed,
                     source_path: source.path.clone().into(),
                     source: source.source,
                     display_order: *display_order,
@@ -979,6 +999,7 @@ mod tests {
                 r#async: false,
                 status_message: None,
                 additional_context_limit: None,
+                fail_closed: false,
             }],
         }
     }
@@ -995,6 +1016,7 @@ mod tests {
                 r#async: false,
                 status_message: None,
                 additional_context_limit: Some(additional_context_limit),
+                fail_closed: false,
             }],
         }
     }
@@ -1263,6 +1285,7 @@ mod tests {
                 timeout_sec: 600,
                 status_message: None,
                 additional_context_limit: Default::default(),
+                fail_closed: false,
                 source_path: source_path.clone().into(),
                 source: hook_source(),
                 display_order: 0,
@@ -1303,6 +1326,7 @@ mod tests {
                 timeout_sec: 600,
                 status_message: None,
                 additional_context_limit: Default::default(),
+                fail_closed: false,
                 source_path: source_path.clone().into(),
                 source: hook_source(),
                 display_order: 0,
@@ -1341,6 +1365,7 @@ mod tests {
                         r#async: false,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     },
                     HookHandlerConfig::Command {
                         command: "echo clamped".to_string(),
@@ -1349,6 +1374,7 @@ mod tests {
                         r#async: true,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     },
                 ],
             }],
@@ -1431,6 +1457,7 @@ mod tests {
                     r#async: true,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
         );
@@ -1472,6 +1499,45 @@ mod tests {
                 "clamping Interrupt hook timeout to 3s in {}",
                 source_path.display()
             )]
+        );
+    }
+
+    #[test]
+    fn fail_closed_forces_an_async_handler_to_run_synchronously() {
+        let source_path = source_path();
+        let hook_states = std::collections::HashMap::new();
+        let mut handlers = Vec::new();
+        let mut warnings = Vec::new();
+
+        append_matcher_groups(
+            &mut handlers,
+            &mut Vec::new(),
+            &mut warnings,
+            &mut 0,
+            &mut hook_handler_source(&source_path, &hook_states),
+            HookEventName::PreToolUse,
+            vec![MatcherGroup {
+                matcher: Some("Bash".to_string()),
+                hooks: vec![HookHandlerConfig::Command {
+                    command: "echo guard".to_string(),
+                    command_windows: None,
+                    timeout_sec: None,
+                    r#async: true,
+                    status_message: None,
+                    additional_context_limit: None,
+                    fail_closed: true,
+                }],
+            }],
+        );
+
+        assert_eq!(handlers.len(), 1);
+        assert!(handlers[0].fail_closed);
+        assert_eq!(handlers[0].execution_mode(), HookExecutionMode::Sync);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("failClosed")),
+            "expected a warning about the async/failClosed combination, got {warnings:?}"
         );
     }
 
@@ -1621,6 +1687,7 @@ mod tests {
                         r#async: false,
                         status_message: None,
                         additional_context_limit: None,
+                        fail_closed: false,
                     }],
                 }],
                 ..Default::default()
@@ -1652,6 +1719,7 @@ mod tests {
                     r#async: false,
                     status_message: None,
                     additional_context_limit: None,
+                    fail_closed: false,
                 }],
             }],
         );
