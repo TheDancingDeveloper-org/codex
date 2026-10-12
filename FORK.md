@@ -49,7 +49,7 @@ Record the new base tag and any dropped or reworked patch in the table below.
 
 | Commit | What | Upstream status |
 |---|---|---|
-| — | `agent-state` terminal title item (`codex: ready\|working\|awaiting approval`), written only on change, with the user's title pushed (`CSI 22;0t`) at the first title write and popped (`CSI 23;0t`) on exit. Idle with `animations = false` schedules no refresh. SHA filled once the branch commit lands. | fork-only; Klaudia contract from vogt `internal/tui/idle.go` |
+| — | `agent-state` terminal title item (`codex: ready\|working\|awaiting approval`), written only on change, with the user's title pushed (`CSI 22;0t`) at the first title write and popped (`CSI 23;0t`) on exit. Idle with `animations = false` schedules no refresh. Landed on `fork/wi-1127-agent-state` at `b5f9b014`. | fork-only; Klaudia contract from vogt `internal/tui/idle.go` |
 
 ## External adapters
 
