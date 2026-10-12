@@ -2285,10 +2285,11 @@ impl ModelClientSession {
                 .await
             }
             // The Chat Completions request and SSE parser land in the next step.
-            WireApi::Chat => Err(ApiError::Stream(
+            WireApi::Chat => Err(codex_protocol::error::CodexErrorDetails::Stream(
                 "wire_api = \"chat\" is accepted but the chat completions client is not wired yet"
                     .to_string(),
-            )),
+            )
+            .into()),
         }
     }
 
