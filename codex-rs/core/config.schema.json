@@ -6772,6 +6772,13 @@
             "responses"
           ],
           "type": "string"
+        },
+        {
+          "description": "The Chat Completions API at `/v1/chat/completions`.\n\nRestored in this fork so a provider that does not return tool calls over the Responses API (grok through LiteLLM, DLab, OpenRouter) can still drive function tools. The built-in `ollama-chat` provider id stays rejected.",
+          "enum": [
+            "chat"
+          ],
+          "type": "string"
         }
       ]
     },
