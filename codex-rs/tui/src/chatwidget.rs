@@ -73,6 +73,8 @@ use crate::status::rate_limit_snapshot_display_for_limit;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_title::SetTerminalTitleResult;
 use crate::terminal_title::clear_terminal_title;
+use crate::terminal_title::pop_terminal_title;
+use crate::terminal_title::push_terminal_title;
 use crate::terminal_title::set_terminal_title;
 use crate::text_formatting::proper_join;
 use crate::token_usage::TokenUsage;
@@ -725,6 +727,8 @@ pub(crate) struct ChatWidget {
     terminal_title_invalid_items_warned: Arc<AtomicBool>,
     // Last terminal title emitted, to avoid writing duplicate OSC updates.
     pub(crate) last_terminal_title: Option<String>,
+    /// True after the user's title has been pushed (`CSI 22 ; 0 t`) and not yet popped.
+    pub(crate) terminal_title_pushed: bool,
     // Last visible "action required" state observed by the terminal-title renderer.
     last_terminal_title_requires_action: bool,
     // Original terminal-title config captured when the setup UI opens.

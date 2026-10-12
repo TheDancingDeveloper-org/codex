@@ -242,6 +242,35 @@ impl ChatWidget {
         Ok(())
     }
 
+    /// Saves the user's window title once, before the first OSC title write.
+    ///
+    /// Reading the previous title is not portable. `CSI 22 ; 0 t` pushes it on
+    /// the terminal's own stack so [`restore_terminal_title`] can pop it back
+    /// on exit instead of leaving a blank title.
+    fn push_user_terminal_title_once(&mut self) -> std::io::Result<()> {
+        if self.terminal_title_pushed {
+            return Ok(());
+        }
+        push_terminal_title()?;
+        self.terminal_title_pushed = true;
+        Ok(())
+    }
+
+    /// Restores the title saved by [`push_user_terminal_title_once`].
+    ///
+    /// Called from `App`'s drop. A second pop is a no-op once the stack entry
+    /// has been consumed, so a later drop of the same widget does not pop a
+    /// title Codex never pushed.
+    pub(crate) fn restore_terminal_title(&mut self) -> std::io::Result<()> {
+        if !self.terminal_title_pushed {
+            return Ok(());
+        }
+        pop_terminal_title()?;
+        self.terminal_title_pushed = false;
+        self.last_terminal_title = None;
+        Ok(())
+    }
+
     /// Renders and applies the terminal title for one parsed selection snapshot.
     ///
     /// Empty selections clear the managed title. Non-empty selections render the
@@ -252,6 +281,11 @@ impl ChatWidget {
     fn refresh_terminal_title_from_selections(&mut self, selections: &StatusSurfaceSelections) {
         if self.app_event_tx.voice_only.load(Ordering::Relaxed) {
             return;
+        }
+        if !selections.terminal_title_items.is_empty()
+            && let Err(err) = self.push_user_terminal_title_once()
+        {
+            tracing::debug!(error = %err, "failed to push terminal title");
         }
         self.last_terminal_title_requires_action =
             self.terminal_title_shows_action_required_with_selections(selections);
@@ -852,6 +886,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::ProjectName => return self.terminal_title_project_name(),
             StatusSurfacePreviewItem::ProjectRoot => StatusLineItem::ProjectRoot,
             StatusSurfacePreviewItem::Status => return Some(self.run_state_status_text()),
+            StatusSurfacePreviewItem::AgentState => return Some(self.agent_state_title_text()),
             StatusSurfacePreviewItem::TaskProgress => return self.terminal_title_task_progress(),
             StatusSurfacePreviewItem::CurrentDir => StatusLineItem::CurrentDir,
             StatusSurfacePreviewItem::Hostname => StatusLineItem::Hostname,
@@ -902,6 +937,12 @@ impl ChatWidget {
             )),
             TerminalTitleItem::Spinner => self.terminal_title_spinner_text_at(now),
             TerminalTitleItem::Status => Some(self.run_state_status_text()),
+            // The whole title, so a session manager can match one stable string
+            // without parsing `run-state`. Approval wins; a task that is not
+            // running (the same cases `run-state` labels Ready) is ready;
+            // Working, Thinking, and Waiting collapse to working. No error
+            // variant exists on the status kind, so none is invented here.
+            TerminalTitleItem::AgentState => Some(self.agent_state_title_text()),
             TerminalTitleItem::Thread | TerminalTitleItem::ThreadName => {
                 let item = if item == TerminalTitleItem::ThreadName {
                     StatusLineItem::ThreadName
@@ -1019,6 +1060,23 @@ impl ChatWidget {
             TerminalTitleStatusKind::Working => "Working".to_string(),
             TerminalTitleStatusKind::WaitingForBackgroundTerminal => "Waiting".to_string(),
             TerminalTitleStatusKind::Thinking => "Thinking".to_string(),
+        }
+    }
+
+    /// Whole-title agent state written as OSC 2 by the `agent-state` item.
+    ///
+    /// Written only when the rendered title changes (see
+    /// `refresh_terminal_title_from_selections`). This item never schedules an
+    /// animation refresh, so an idle prompt with `animations = false` and no
+    /// `activity` or thread-name items emits no further title bytes.
+    pub(super) fn agent_state_title_text(&self) -> String {
+        if self.terminal_title_requires_action() {
+            return "codex: awaiting approval".to_string();
+        }
+        if self.run_state_status_text() == "Ready" {
+            "codex: ready".to_string()
+        } else {
+            "codex: working".to_string()
         }
     }
 
