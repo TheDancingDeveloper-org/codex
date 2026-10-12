@@ -382,6 +382,78 @@ async fn thread_title_progress_animates_when_main_turn_is_idle() {
     assert!(chat.terminal_title_next_refresh.is_none());
 }
 
+fn exec_approval(call_id: &str) -> ExecApprovalRequestEvent {
+    ExecApprovalRequestEvent {
+        kind: Default::default(),
+        call_id: call_id.into(),
+        approval_id: Some(call_id.into()),
+        turn_id: format!("turn-{call_id}"),
+        environment_id: None,
+        command: vec!["bash".into(), "-lc".into(), "echo hello".into()],
+        cwd: AbsolutePathBuf::current_dir().expect("current dir"),
+        reason: Some("need confirmation".into()),
+        network_approval_context: None,
+        proposed_execpolicy_amendment: None,
+        proposed_network_policy_amendments: None,
+        additional_permissions: None,
+        available_decisions: None,
+    }
+}
+
+#[tokio::test]
+async fn agent_state_title_reports_ready_working_and_awaiting_approval() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.local_settings.tui.animations = false;
+    chat.local_settings.tui.terminal_title = Some(vec!["agent-state".into()]);
+    chat.bottom_pane.set_task_running(/*running*/ false);
+    chat.refresh_terminal_title();
+    assert_eq!(chat.last_terminal_title.as_deref(), Some("codex: ready"));
+    assert!(chat.terminal_title_next_refresh.is_none());
+
+    chat.bottom_pane.set_task_running(/*running*/ true);
+    chat.refresh_terminal_title();
+    assert_eq!(chat.last_terminal_title.as_deref(), Some("codex: working"));
+    assert!(chat.terminal_title_next_refresh.is_none());
+
+    handle_exec_approval_request(
+        &mut chat,
+        "sub-agent-state",
+        exec_approval("call-agent-state"),
+    );
+    chat.refresh_terminal_title();
+    assert_eq!(
+        chat.last_terminal_title.as_deref(),
+        Some("codex: awaiting approval")
+    );
+    // Approval with only `agent-state` does not blink, so an idle loop writes nothing.
+    assert!(chat.terminal_title_next_refresh.is_none());
+
+    // A second refresh of the same state writes no further title bytes.
+    let written = chat.last_terminal_title.clone();
+    chat.refresh_terminal_title();
+    assert_eq!(chat.last_terminal_title, written);
+    assert!(chat.terminal_title_next_refresh.is_none());
+}
+
+#[tokio::test]
+async fn agent_state_title_is_restored_on_exit() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.local_settings.tui.animations = false;
+    chat.local_settings.tui.terminal_title = Some(vec!["agent-state".into()]);
+    chat.refresh_terminal_title();
+    assert!(chat.terminal_title_pushed);
+    assert_eq!(chat.last_terminal_title.as_deref(), Some("codex: ready"));
+
+    chat.restore_terminal_title().expect("pop the saved title");
+    assert!(!chat.terminal_title_pushed);
+    assert_eq!(chat.last_terminal_title, None);
+
+    // Dropping twice must not pop a title this widget never pushed.
+    chat.restore_terminal_title()
+        .expect("second restore is a no-op");
+    assert!(!chat.terminal_title_pushed);
+}
+
 #[tokio::test]
 async fn thread_title_progress_preserves_suffix_after_truncation_and_in_default_footer() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;

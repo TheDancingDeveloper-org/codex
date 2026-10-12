@@ -163,6 +163,8 @@ fn model_provider_from_proto(
         Ok(proto::WireApi::Unspecified) => {
             return Err(parse_error("remote thread config omitted wire_api"));
         }
+        // Remote thread config has no chat variant. A local `wire_api = "chat"`
+        // provider cannot round-trip through it, and an unknown value is an error.
         Err(_) => {
             return Err(parse_error(format!(
                 "remote thread config returned unknown wire_api: {}",
@@ -314,6 +316,8 @@ fn proto_string_map(values: HashMap<String, RedactedString>) -> proto::StringMap
 fn proto_wire_api(wire_api: WireApi) -> proto::WireApi {
     match wire_api {
         WireApi::Responses => proto::WireApi::Responses,
+        // No proto variant. Tests only round-trip Responses providers.
+        WireApi::Chat => proto::WireApi::Unspecified,
     }
 }
 

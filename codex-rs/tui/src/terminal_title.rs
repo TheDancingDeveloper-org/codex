@@ -4,8 +4,11 @@
 //! that happens immediately before we emit it. It is intentionally narrow:
 //! callers decide when the title should change and whether an empty title means
 //! "leave the old title alone" or "clear the title Codex last wrote".
-//! This module does not attempt to read or restore the terminal's previous
-//! title because that is not portable across terminals.
+//! Reading the previous title is not portable. Restoring it is: xterm's window
+//! operations push (`CSI 22 ; 0 t`) and pop (`CSI 23 ; 0 t`) the title stack
+//! without Codex ever learning what the title was. The TUI pushes once before
+//! the first title write and pops on exit, so the user's title comes back
+//! instead of being blanked.
 //!
 //! Sanitization is necessary because title content is assembled from untrusted
 //! text sources such as model output, thread names, project paths, and config.
@@ -85,6 +88,30 @@ pub(crate) fn set_terminal_title(title: &str) -> io::Result<SetTerminalTitleResu
     Ok(SetTerminalTitleResult::Applied)
 }
 
+/// Pushes the current window title onto the terminal's title stack (`CSI 22 ; 0 t`).
+///
+/// xterm window operation 22 with parameter 0 saves both the icon and window
+/// titles. Call this once, before the first OSC title write, so a later
+/// [`pop_terminal_title`] restores whatever the shell had set.
+pub(crate) fn push_terminal_title() -> io::Result<()> {
+    if !stdout().is_terminal() {
+        return Ok(());
+    }
+    execute!(stdout(), PushWindowTitle)
+}
+
+/// Pops the window title stack (`CSI 23 ; 0 t`), restoring the title saved by
+/// [`push_terminal_title`].
+///
+/// This is the exit path. It does not write an empty OSC title: blanking the
+/// title leaves the user's shell prompt with no title at all.
+pub(crate) fn pop_terminal_title() -> io::Result<()> {
+    if !stdout().is_terminal() {
+        return Ok(());
+    }
+    execute!(stdout(), PopWindowTitle)
+}
+
 /// Clears the current terminal title by writing an empty OSC title payload.
 ///
 /// This clears the visible title; it does not restore whatever title the shell
@@ -95,6 +122,44 @@ pub(crate) fn clear_terminal_title() -> io::Result<()> {
     }
 
     execute!(stdout(), SetWindowTitle(String::new()))
+}
+
+/// `CSI 22 ; 0 t` — push icon and window titles.
+struct PushWindowTitle;
+
+impl Command for PushWindowTitle {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        write!(f, "\x1b[22;0t")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        true
+    }
+}
+
+/// `CSI 23 ; 0 t` — pop icon and window titles.
+struct PopWindowTitle;
+
+impl Command for PopWindowTitle {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        write!(f, "\x1b[23;0t")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +275,8 @@ fn is_disallowed_terminal_title_char(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::MAX_TERMINAL_TITLE_CHARS;
+    use super::PopWindowTitle;
+    use super::PushWindowTitle;
     use super::SetWindowTitle;
     use super::TitleEncoding;
     use super::sanitize_terminal_title;
@@ -247,6 +314,20 @@ mod tests {
         let sanitized = sanitize_terminal_title(&input, TitleEncoding::Unicode);
         assert_eq!(sanitized.len(), MAX_TERMINAL_TITLE_CHARS);
         assert_eq!(sanitized.chars().last(), Some('b'));
+    }
+
+    #[test]
+    fn push_and_pop_are_xterm_title_stack_operations() {
+        let mut pushed = String::new();
+        PushWindowTitle
+            .write_ansi(&mut pushed)
+            .expect("encode title push");
+        let mut popped = String::new();
+        PopWindowTitle
+            .write_ansi(&mut popped)
+            .expect("encode title pop");
+        assert_eq!(pushed, "\x1b[22;0t");
+        assert_eq!(popped, "\x1b[23;0t");
     }
 
     #[test]
