@@ -41,9 +41,11 @@ pub struct Cli {
     #[arg(long = "ephemeral", global = true, default_value_t = false)]
     pub ephemeral: bool,
 
-    /// Id for a newly started thread. Any UUID version is accepted. Rejected
-    /// with resume, fork, and `--ephemeral`.
-    #[arg(long = "session-id", value_name = "UUID", global = true)]
+    /// Id for a newly started thread. Any UUID version is accepted. Not a
+    /// global flag: `resume` and `fork` already take a positional session id,
+    /// and a global `--session-id` would steal that value. Rejected with
+    /// `--ephemeral`.
+    #[arg(long = "session-id", value_name = "UUID")]
     pub session_id: Option<String>,
 
     /// Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`.
