@@ -277,6 +277,7 @@ impl ChatWidget {
             status_line_invalid_items_warned,
             terminal_title_invalid_items_warned,
             last_terminal_title: None,
+            terminal_title_pushed: false,
             last_terminal_title_requires_action: false,
             terminal_title_setup_original_items: None,
             status_surface_overrides: StatusSurfaceOverrides::default(),
