@@ -14,8 +14,8 @@ expression: "render_lines(&view, 84)"
   [x] thread-title  Current thread title, or thread identifier when unnamed         
   [ ] app-name      Codex app name                                                  
   [ ] current-dir   Current working directory                                       
+  [ ] agent-state   Stable agent state for a session manager (codex: ready, working…
   [ ] thread-name   Current thread name (omitted when unnamed)                      
-  [ ] git-branch    Current Git branch (omitted when unavailable)                   
 ↓                                                                                   
   [ ! ] Action Required | my-project | Working | thread title                       
   space toggle · ←/→ reorder · enter save · esc cancel
