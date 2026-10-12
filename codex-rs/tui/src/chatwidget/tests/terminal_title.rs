@@ -415,7 +415,11 @@ async fn agent_state_title_reports_ready_working_and_awaiting_approval() {
     assert_eq!(chat.last_terminal_title.as_deref(), Some("codex: working"));
     assert!(chat.terminal_title_next_refresh.is_none());
 
-    handle_exec_approval_request(&mut chat, "sub-agent-state", exec_approval("call-agent-state"));
+    handle_exec_approval_request(
+        &mut chat,
+        "sub-agent-state",
+        exec_approval("call-agent-state"),
+    );
     chat.refresh_terminal_title();
     assert_eq!(
         chat.last_terminal_title.as_deref(),
@@ -440,8 +444,7 @@ async fn agent_state_title_is_restored_on_exit() {
     assert!(chat.terminal_title_pushed);
     assert_eq!(chat.last_terminal_title.as_deref(), Some("codex: ready"));
 
-    chat.restore_terminal_title()
-        .expect("pop the saved title");
+    chat.restore_terminal_title().expect("pop the saved title");
     assert!(!chat.terminal_title_pushed);
     assert_eq!(chat.last_terminal_title, None);
 
