@@ -1657,6 +1657,19 @@ async fn run_ratatui_app(
         shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
         return Err(err.into());
     }
+    if cli.session_id.is_some()
+        && (config.ephemeral
+            || matches!(
+                &session_selection,
+                resume_picker::SessionSelection::Resume(_)
+                    | resume_picker::SessionSelection::Fork(_)
+            ))
+    {
+        shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+        return Err(color_eyre::eyre::eyre!(
+            "--session-id is only supported when starting a new persisted thread"
+        ));
+    }
 
     if matches!(
         &session_selection,
@@ -2080,6 +2093,7 @@ async fn run_ratatui_app(
         startup_draft,
         managed_worktree,
         daemon_cli_executable,
+        cli.session_id.clone(),
     ))
     .await;
 

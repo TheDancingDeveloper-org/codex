@@ -239,6 +239,7 @@ impl App {
         mut startup_draft: StartupDraftPump,
         managed_worktree: Option<crate::ManagedTuiWorktree>,
         daemon_cli_executable: Option<AbsolutePathBuf>,
+        caller_session_id: Option<String>,
     ) -> Result<AppExitInfo> {
         use tokio_stream::StreamExt;
 
@@ -334,6 +335,7 @@ impl App {
             &harness_overrides,
             &loader_overrides,
         );
+        launch_choices.session_id = caller_session_id;
         let bootstrap = match bootstrap {
             Some(bootstrap) => bootstrap,
             None => match startup_draft

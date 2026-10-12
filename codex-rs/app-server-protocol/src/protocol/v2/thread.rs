@@ -158,6 +158,13 @@ pub struct ThreadStartParams {
     #[experimental("thread/start.mockExperimentalField")]
     #[ts(optional = nullable)]
     pub mock_experimental_field: Option<String>,
+    /// Caller-chosen thread id for the new thread. Any UUID version is
+    /// accepted. Rejected when a thread with that id already exists, and not
+    /// supported for ephemeral threads. When omitted, the server assigns a
+    /// UUIDv7.
+    #[experimental("thread/start.threadId")]
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
     /// If true, opt into emitting raw Responses API items on the event stream.
     /// This is for internal use only (e.g. Codex Cloud).
     #[experimental("thread/start.experimentalRawEvents")]
