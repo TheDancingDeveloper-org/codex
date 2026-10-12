@@ -1231,8 +1231,8 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        if let Err(err) = self.chat_widget.clear_managed_terminal_title() {
-            tracing::debug!(error = %err, "failed to clear terminal title on app drop");
+        if let Err(err) = self.chat_widget.restore_terminal_title() {
+            tracing::debug!(error = %err, "failed to restore terminal title on app drop");
         }
     }
 }
