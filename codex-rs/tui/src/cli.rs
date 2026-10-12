@@ -61,8 +61,15 @@ pub struct Cli {
 
     /// Id for a newly started thread. Any UUID version is accepted. Rejected
     /// with resume, fork, and ephemeral sessions.
-    #[arg(long = "session-id", value_name = "UUID")]
-    pub session_id: Option<String>,
+    ///
+    /// The Rust field is named `new_session_id` rather than `session_id`: this
+    /// struct is flattened into the `resume` and `fork` subcommands, which
+    /// already register a positional argument whose clap id is `session_id`.
+    /// Clap rejects the duplicate id at runtime (a panic under debug
+    /// assertions), so `codex resume` and `codex fork` would exit 101 before
+    /// drawing anything.
+    #[arg(long = "session-id", value_name = "UUID", id = "new_session_id")]
+    pub new_session_id: Option<String>,
 
     /// Internal: show all sessions (disables cwd filtering and shows CWD column).
     #[clap(skip)]

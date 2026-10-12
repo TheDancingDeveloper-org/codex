@@ -1859,7 +1859,7 @@ async fn run_ratatui_app(
         shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
         return Err(err.into());
     }
-    if cli.session_id.is_some()
+    if cli.new_session_id.is_some()
         && (config.ephemeral
             || matches!(
                 &session_selection,
@@ -2400,7 +2400,7 @@ async fn run_ratatui_app(
         startup_draft,
         managed_worktree,
         daemon_cli_executable,
-        cli.session_id.clone(),
+        cli.new_session_id.clone(),
     ))
     .await;
 
