@@ -17,8 +17,22 @@ core edits.
   `rust-v0.162.0`. The tag lives on a release branch, not on upstream `main`:
   `2351d9e1b` (upstream `main` at fork time) is 114 commits away and not
   descended from the tag, so it is not a valid base.
-- All fork work branches off `fork/main` and every fork pull request targets
-  `fork/main`. Never open, comment on, or push anything to openai/codex.
+- `integrate/codex-next` is the landing base for fork work. It is `fork/main`
+  plus the work in flight, and workers branch from it, not from `fork/main`.
+  The flow is:
+  - A worker branches from `origin/integrate/codex-next` in its own worktree,
+    on `wi-<n>-<slug>`, and lands by pushing that branch. It opens no pull
+    request.
+  - Oversight reviews the pushed branch and merges it into
+    `integrate/codex-next` by rebase or fast-forward only.
+  - The integration pull request from `integrate/codex-next` targets
+    `fork/main`, never `main`, and the operator approves it. Merging it
+    publishes `fork-<sha>`, where `<sha>` is the full commit SHA of the new
+    `fork/main`.
+- The integration branch is rebased onto `fork/main` when `fork/main` moves.
+  Never merge `fork/main` or `main` into `integrate/*`, and never leave a merge
+  commit on it. History stays linear.
+- Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
 
 Upstream history is never rewritten. Upstream commits mirror an internal
