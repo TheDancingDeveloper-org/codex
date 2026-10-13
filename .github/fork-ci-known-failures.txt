@@ -22,3 +22,8 @@ test(shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_pipe_recov
 test(shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_tty_recovery) # fails on unmodified fork/main, fork-ci run 38089490933
 test(shell_snapshot_v2_filters_profile_exports_and_stays_in_memory::remote_sandbox) # fails on unmodified fork/main, fork-ci run 38089490933
 
+# Flaky on gha-spot-1 (WI-1290/WI-1291): event-ordering race at
+# session_lifecycle_requests.rs:2191 (a different AppEvent arrives before
+# DynamicToolThreadStarted); fails all nextest retries in fork-ci runs
+# 38318542859 and 38198407002, passes in 38314510980 on the same code line.
+test(session_lifecycle_requests::dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespace) # flaky race, fork-ci runs 38318542859 38198407002
