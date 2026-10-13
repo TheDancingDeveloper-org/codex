@@ -30,8 +30,11 @@ core edits.
     publishes `fork-<sha>`, where `<sha>` is the full commit SHA of the new
     `fork/main`.
 - The integration branch is rebased onto `fork/main` when `fork/main` moves.
-  Never merge `fork/main` or `main` into `integrate/*`, and never leave a merge
-  commit on it. History stays linear.
+  Never merge `fork/main` or `main` into `integrate/*`. From now on, no merge
+  commit lands on `integrate/codex-next`, and oversight merges into it by
+  rebase or fast-forward only. The integration pull request into `fork/main`
+  currently lands as a merge commit, so `fork/main` is not linear: its tip
+  merges `integrate/codex-next` (for example `ca04973b46`, PR #25).
 - Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
 
