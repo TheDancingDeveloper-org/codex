@@ -13410,6 +13410,7 @@ async fn session_start_hooks_only_load_from_trusted_project_layers() -> std::io:
 
     let config = ConfigBuilder::default()
         .codex_home(codex_home)
+        .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
         .fallback_cwd(Some(nested))
         .build()
         .await?;
@@ -13470,6 +13471,7 @@ async fn session_start_hooks_require_project_trust_without_config_toml() -> std:
 
         let config = ConfigBuilder::default()
             .codex_home(codex_home)
+            .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .fallback_cwd(Some(nested.clone()))
             .build()
             .await?;
