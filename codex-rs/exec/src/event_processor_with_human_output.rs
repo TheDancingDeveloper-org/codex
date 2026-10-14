@@ -2,6 +2,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use codex_app_server_protocol::CommandExecutionStatus;
+use codex_app_server_protocol::McpServerStartupState;
 use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ServerNotification;
@@ -240,6 +241,18 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 CodexStatus::Running
             }
             ServerNotification::Warning(notification) => self.process_warning(notification.message),
+            ServerNotification::McpServerStatusUpdated(notification)
+                if notification.status == McpServerStartupState::Failed =>
+            {
+                let error = notification
+                    .error
+                    .map(|error| format!(": {error}"))
+                    .unwrap_or_default();
+                self.process_warning(format!(
+                    "MCP server `{}` failed to start{error}; continuing without its tools",
+                    notification.name
+                ))
+            }
             ServerNotification::AuthRecoveryStarted(notification) => {
                 eprintln!("{}", notification.message);
                 CodexStatus::Running

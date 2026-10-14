@@ -500,6 +500,32 @@ impl ToolRegistry {
             .map(|tool| Arc::clone(&tool.runtime))
     }
 
+    /// Resolves an MCP tool named without its namespace: the flattened
+    /// `mcp__<server>__<tool>` form, or a bare tool name exactly one MCP server provides.
+    pub(crate) fn resolve_unqualified_mcp_tool(&self, name: &ToolName) -> Option<ToolName> {
+        if !name.is_default_namespace() {
+            return None;
+        }
+        let requested = name.name.as_str();
+        let mcp_tools = || {
+            self.tools.iter().filter(|(tool_name, tool)| {
+                tool.exposure != ToolExposure::Hidden
+                    && tool.runtime.mcp_server_name().is_some()
+                    && !tool_name.is_default_namespace()
+            })
+        };
+        if let Some((tool_name, _)) = mcp_tools().find(|(tool_name, _)| {
+            let namespace = tool_name.namespace.as_deref().unwrap_or_default();
+            flat_tool_name(tool_name) == requested
+                || format!("{}__{}", namespace.trim_end_matches("__"), tool_name.name) == requested
+        }) {
+            return Some(tool_name.clone());
+        }
+        let mut matches = mcp_tools().filter(|(tool_name, _)| tool_name.name == requested);
+        let (first, _) = matches.next()?;
+        matches.next().is_none().then(|| first.clone())
+    }
+
     #[cfg(test)]
     pub(crate) fn tool_names_for_test(&self) -> Vec<ToolName> {
         let mut names = self.tools.keys().cloned().collect::<Vec<_>>();
@@ -554,11 +580,24 @@ impl ToolRegistry {
             }
         }
 
+        let mut tool_name = tool_name;
+        if self.tool(&tool_name).is_none()
+            && let Some(resolved) = self.resolve_unqualified_mcp_tool(&tool_name)
+        {
+            tool_name = resolved;
+            invocation.tool_name = tool_name.clone();
+        }
         let dispatch_trace = ToolDispatchTrace::start(&invocation);
         let tool = match self.tool(&tool_name) {
             Some(tool) => tool,
             None => {
-                let message = unsupported_tool_call_message(&invocation.payload, &tool_name);
+                let pending_servers = invocation
+                    .session
+                    .services
+                    .mcp_runtime
+                    .pending_startup_servers();
+                let message =
+                    missing_tool_call_message(&invocation.payload, &tool_name, &pending_servers);
                 let log_payload = tool_log_payload(&invocation.payload, &invocation.source);
                 let mut tool_result_tags = Vec::with_capacity(2);
                 sandbox_tags.append_metric_tags(&mut tool_result_tags);
@@ -854,6 +893,58 @@ fn function_hook_tool_input(arguments: &str) -> Value {
     }
 
     serde_json::from_str(arguments).unwrap_or_else(|_| Value::String(arguments.to_string()))
+}
+
+/// Explains a call that matched no registered tool. A call aimed at an MCP server whose
+/// handshake is still running says so, since retrying later can succeed.
+fn missing_tool_call_message(
+    payload: &ToolPayload,
+    tool_name: &ToolName,
+    pending_mcp_servers: &[String],
+) -> String {
+    let flat_name = flat_tool_name(tool_name);
+    if let Some(server) = pending_mcp_server_for(&flat_name, pending_mcp_servers) {
+        return format!(
+            "MCP server `{server}` is still starting; `{flat_name}` is not available yet. Retry the call once the server is ready."
+        );
+    }
+    let message = unsupported_tool_call_message(payload, tool_name);
+    if pending_mcp_servers.is_empty() {
+        message
+    } else {
+        format!(
+            "{message} (MCP servers still starting: {})",
+            pending_mcp_servers.join(", ")
+        )
+    }
+}
+
+fn pending_mcp_server_for<'a>(
+    flat_name: &str,
+    pending_mcp_servers: &'a [String],
+) -> Option<&'a str> {
+    let rest = flat_name.strip_prefix("mcp__")?;
+    pending_mcp_servers
+        .iter()
+        .map(String::as_str)
+        .find(|server| {
+            let sanitized = server
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() || ch == '_' {
+                        ch
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>();
+            [*server, sanitized.as_str()].iter().any(|candidate| {
+                rest == *candidate
+                    || rest
+                        .strip_prefix(candidate)
+                        .is_some_and(|tail| tail.starts_with("__"))
+            })
+        })
 }
 
 fn unsupported_tool_call_message(payload: &ToolPayload, tool_name: &ToolName) -> String {

@@ -859,6 +859,25 @@ impl McpConnectionSet {
         !self.servers.is_empty()
     }
 
+    pub(crate) fn pending_startup_servers(&self) -> Vec<String> {
+        let mut pending = self
+            .servers
+            .iter()
+            .filter(|(_, view)| {
+                !view
+                    .connection
+                    .client
+                    .startup_complete
+                    .load(Ordering::Acquire)
+                    && !view.connection.startup_is_dormant()
+                    && !view.connection.client.cancel_token.is_cancelled()
+            })
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        pending.sort();
+        pending
+    }
+
     pub(crate) fn contains_server(&self, server_name: &str) -> bool {
         self.servers.contains_key(server_name)
     }

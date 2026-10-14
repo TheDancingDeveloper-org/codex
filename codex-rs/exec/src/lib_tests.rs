@@ -900,3 +900,25 @@ fn sample_thread_start_response() -> ThreadStartResponse {
         multi_agent_mode: Default::default(),
     }
 }
+
+#[test]
+fn exec_waits_for_mcp_startup_unless_grace_is_configured() {
+    let key = "mcp_optional_startup_grace_ms";
+    let default_toml = codex_config::config_toml::ConfigToml::default();
+    assert_eq!(
+        with_exec_mcp_startup_wait(Vec::new(), &default_toml),
+        vec![(key.to_string(), codex_config::TomlValue::Integer(0))]
+    );
+
+    let configured_toml = codex_config::config_toml::ConfigToml {
+        mcp_optional_startup_grace_ms: Some(2500),
+        ..Default::default()
+    };
+    assert_eq!(
+        with_exec_mcp_startup_wait(Vec::new(), &configured_toml),
+        Vec::new()
+    );
+
+    let cli = vec![(key.to_string(), codex_config::TomlValue::Integer(100))];
+    assert_eq!(with_exec_mcp_startup_wait(cli.clone(), &default_toml), cli);
+}
