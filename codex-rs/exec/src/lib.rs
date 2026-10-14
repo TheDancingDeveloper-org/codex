@@ -514,6 +514,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     )
     .await;
     let bootstrap_config_toml = &bootstrap_config.config_toml;
+    let cli_kv_overrides = with_exec_mcp_startup_wait(cli_kv_overrides, bootstrap_config_toml);
     let bootstrap_auth_config = embedded_network_policy
         .bind_bootstrap_auth(bootstrap_auth_config(&codex_home, &bootstrap_config)?);
     // API keys cannot fetch workspace-managed configuration. Preserve the
@@ -1511,6 +1512,23 @@ fn thread_resume_params_from_config(
         exclude_turns: true,
         ..ThreadResumeParams::default()
     }
+}
+
+/// Headless runs have no later turn in which a slow MCP server's tools could appear, so
+/// `exec` waits for every enabled server's startup (each bounded by its own
+/// `startup_timeout_sec`) unless the operator chose an optional-startup grace explicitly.
+/// A server that fails or times out is reported and the run proceeds without it.
+fn with_exec_mcp_startup_wait(
+    mut cli_kv_overrides: Vec<(String, codex_config::TomlValue)>,
+    config_toml: &codex_config::config_toml::ConfigToml,
+) -> Vec<(String, codex_config::TomlValue)> {
+    const KEY: &str = "mcp_optional_startup_grace_ms";
+    if config_toml.mcp_optional_startup_grace_ms.is_none()
+        && !cli_kv_overrides.iter().any(|(key, _)| key == KEY)
+    {
+        cli_kv_overrides.push((KEY.to_string(), codex_config::TomlValue::Integer(0)));
+    }
+    cli_kv_overrides
 }
 
 fn thread_config_overrides_from_config(config: &Config) -> Option<HashMap<String, Value>> {

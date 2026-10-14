@@ -842,3 +842,114 @@ fn test_invocation(
         },
     }
 }
+
+struct McpTestHandler {
+    handler: TestHandler,
+    server: &'static str,
+}
+
+impl ToolExecutor<ToolInvocation> for McpTestHandler {
+    fn tool_name(&self) -> codex_tools::ToolName {
+        self.handler.tool_name()
+    }
+
+    fn spec(&self) -> codex_tools::ToolSpec {
+        self.handler.spec()
+    }
+
+    fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
+    where
+        ToolInvocation: 'a,
+    {
+        self.handler.handle(invocation)
+    }
+}
+
+impl CoreToolRuntime for McpTestHandler {
+    fn mcp_server_name(&self) -> Option<&str> {
+        Some(self.server)
+    }
+}
+
+fn mcp_handler(server: &'static str, tool: &str) -> Arc<dyn CoreToolRuntime> {
+    Arc::new(McpTestHandler {
+        handler: TestHandler {
+            tool_name: codex_tools::ToolName::namespaced(format!("mcp__{server}__"), tool),
+        },
+        server,
+    })
+}
+
+#[test]
+fn unqualified_mcp_tool_names_resolve_to_their_namespace() {
+    let registry = ToolRegistry::from_tools([
+        mcp_handler("alpha", "lookup"),
+        mcp_handler("alpha", "shared"),
+        mcp_handler("beta", "shared"),
+        Arc::new(TestHandler {
+            tool_name: codex_tools::ToolName::plain("exec_command"),
+        }) as Arc<dyn CoreToolRuntime>,
+    ]);
+    let alpha_lookup = codex_tools::ToolName::namespaced("mcp__alpha__", "lookup");
+
+    assert_eq!(
+        registry.resolve_unqualified_mcp_tool(&codex_tools::ToolName::plain("mcp__alpha__lookup")),
+        Some(alpha_lookup.clone())
+    );
+    assert_eq!(
+        registry.resolve_unqualified_mcp_tool(&codex_tools::ToolName::plain("lookup")),
+        Some(alpha_lookup)
+    );
+    assert_eq!(
+        registry.resolve_unqualified_mcp_tool(&codex_tools::ToolName::plain("mcp__beta__shared")),
+        Some(codex_tools::ToolName::namespaced("mcp__beta__", "shared"))
+    );
+    // A bare name served by two servers stays ambiguous.
+    assert_eq!(
+        registry.resolve_unqualified_mcp_tool(&codex_tools::ToolName::plain("shared")),
+        None
+    );
+    assert_eq!(
+        registry.resolve_unqualified_mcp_tool(&codex_tools::ToolName::plain("missing")),
+        None
+    );
+    // Namespaced calls are never rewritten.
+    assert_eq!(
+        registry
+            .resolve_unqualified_mcp_tool(&codex_tools::ToolName::namespaced("other", "lookup")),
+        None
+    );
+}
+
+#[test]
+fn missing_tool_message_reports_pending_mcp_server() {
+    let payload = ToolPayload::Function {
+        arguments: "{}".to_string(),
+    };
+    let pending = vec!["slow-server".to_string()];
+
+    assert_eq!(
+        missing_tool_call_message(
+            &payload,
+            &codex_tools::ToolName::plain("mcp__slow_server__lookup"),
+            &pending,
+        ),
+        "MCP server `slow-server` is still starting; `mcp__slow_server__lookup` is not available yet. Retry the call once the server is ready."
+    );
+    assert_eq!(
+        missing_tool_call_message(
+            &payload,
+            &codex_tools::ToolName::namespaced("mcp__slow-server__", "lookup"),
+            &pending,
+        ),
+        "MCP server `slow-server` is still starting; `mcp__slow-server__lookup` is not available yet. Retry the call once the server is ready."
+    );
+    assert_eq!(
+        missing_tool_call_message(&payload, &codex_tools::ToolName::plain("lookup"), &pending),
+        "unsupported call: lookup (MCP servers still starting: slow-server)"
+    );
+    assert_eq!(
+        missing_tool_call_message(&payload, &codex_tools::ToolName::plain("lookup"), &[]),
+        "unsupported call: lookup"
+    );
+}

@@ -510,6 +510,12 @@ impl ServerHandler for TestToolServer {
         request: InitializeRequestParams,
         context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
     ) -> Result<InitializeResult, McpError> {
+        if let Some(delay_ms) = std::env::var("MCP_TEST_INITIALIZE_DELAY_MS")
+            .ok()
+            .and_then(|delay| delay.parse::<u64>().ok())
+        {
+            sleep(Duration::from_millis(delay_ms)).await;
+        }
         if let Ok(barrier_file) = std::env::var(INITIALIZE_BARRIER_FILE_ENV) {
             while !std::path::Path::new(&barrier_file).is_file() {
                 sleep(Duration::from_millis(10)).await;
