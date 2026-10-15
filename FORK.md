@@ -66,3 +66,13 @@ OIDC, R2, winget, or `CODEX_OPENAI_API_KEY` are disabled on this fork with
 `gh workflow disable` — the workflow files themselves are not edited, so
 rebasing onto upstream stays conflict-free. The fork's own workflows are new
 files with fork-unique names (`fork-*.yml`).
+
+GitHub paused every workflow on the fork on 2026-10-15 over Actions usage.
+After it was re-enabled, the issue bots (`issue-deduplicator`, `issue-labeler`,
+`issue-translator`) were disabled too, leaving only `fork-ci` and
+`fork-release` active. `postmerge-ci` (push to `main`, no fork guard) is not
+registered yet and so cannot be disabled ahead of time: after the next mirror
+sync of `main`, cancel its run and `gh workflow disable postmerge-ci`.
+`fork-release` builds x86_64 only, on the self-hosted GCP `rust-heavy` runner,
+whose image bakes the musl build packages (WI-1514); only its short publish job
+runs GitHub-hosted.
