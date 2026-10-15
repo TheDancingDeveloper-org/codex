@@ -4,6 +4,13 @@
 #
 # New file with a fork-unique name on purpose: upstream workflow files are
 # never edited here, so rebasing onto upstream stays conflict-free.
+#
+# Runs on the self-hosted GCP rust-heavy runner, not GitHub-hosted runners
+# (WI-1514): GitHub paused every workflow on this fork over Actions usage.
+# Only trusted events trigger it (pushes to fork/main, workflow_dispatch), so
+# no untrusted fork code reaches the self-hosted runner. The build runs there;
+# only the short publish job stays GitHub-hosted. x86_64 only: every consumer
+# (the Vogt engine on Node B) is x86_64.
 name: fork-release
 
 on:
@@ -21,15 +28,12 @@ env:
 jobs:
   build:
     name: ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: [self-hosted, rust-heavy]
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            runner: ubuntu-24.04
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
     # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:
@@ -47,6 +51,22 @@ jobs:
         with:
           version: "0.14.0"
           use-cache: false
+
+      # rust-heavy jobs have no sudo; its image bakes the packages the upstream
+      # script apt-installs (spot-github-runners image/bake.sh). Shadow `sudo`
+      # so the script's apt-get lines are skipped and everything else runs.
+      - name: Skip apt on the self-hosted runner
+        if: runner.environment == 'self-hosted'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          shim="${RUNNER_TEMP}/no-sudo"
+          mkdir -p "$shim"
+          printf '%s\n' '#!/usr/bin/env bash' \
+            'if [[ "${1:-}" == apt-get ]]; then echo "skip: sudo $*" >&2; exit 0; fi' \
+            'exec "$@"' > "$shim/sudo"
+          chmod +x "$shim/sudo"
+          echo "$shim" >> "$GITHUB_PATH"
 
       - name: Install musl build tools
         working-directory: ${{ github.workspace }}
@@ -147,6 +167,7 @@ jobs:
   release:
     name: publish
     needs: build
+    # Seconds of work, and it needs `gh`, which the rust-heavy image lacks.
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -181,4 +202,4 @@ jobs:
           gh release create "$tag" release/* \
             --target "$GITHUB_SHA" \
             --title "fork ${GITHUB_SHA:0:9}" \
-            --notes "Fork build of ${GITHUB_SHA}. Static musl binaries for x86_64 and aarch64; verify with SHA256SUMS."
+            --notes "Fork build of ${GITHUB_SHA}. Static musl binary for x86_64; verify with SHA256SUMS."
