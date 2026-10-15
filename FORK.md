@@ -14,9 +14,18 @@ core edits.
   committed to it, and it is never the base of a fork pull request.
 - `fork/main` is the fork line: an upstream stable tag plus the carried patch
   series. It currently sits on `c1382380d`, the commit of upstream tag
-  `rust-v0.162.0`. The tag lives on a release branch, not on upstream `main`:
-  `2351d9e1b` (upstream `main` at fork time) is 114 commits away and not
-  descended from the tag, so it is not a valid base.
+  `rust-v0.162.0`.
+- Upstream fixes taken through: rust-v0.162.1
+  This line is separate from the rebase base above. It records fixes taken by
+  cherry-pick, which does not move `fork/main`, because published `fork-<sha>`
+  tags must stay reachable. The two fix commits are `f715d50688` (daemon
+  feature compatibility checks only on explicit CLI overrides, #52648) and
+  `1a1335eefe` (multiline async questions keep line breaks and links, #51866).
+  The tag commit `092d3acd6b` is not taken: it only bumps the workspace version
+  to `0.162.1`, and the fork keeps its `0.162.0` stamp. Branch
+  `fork/wi-1125-upstream-0-162-1`. The tag lives on a release branch, not on
+  upstream `main`: `2351d9e1b` (upstream `main` at fork time) is 114 commits
+  away and not descended from the tag, so it is not a valid base.
 - All fork work branches off `fork/main` and every fork pull request targets
   `fork/main`. Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
@@ -26,8 +35,10 @@ OpenAI repository and carry `GitOrigin-RevId` trailers; leave them intact.
 
 ## Rebase procedure
 
-Run this for each new upstream stable tag (`rust-vX.Y.Z`), weekly or whenever
-a tag ships:
+Run this for each new upstream stable tag (`rust-vX.Y.Z`), whenever a tag
+ships. There is no weekly schedule: GitHub runs `schedule` only from the
+default branch, which is the upstream mirror, so the drift check is run on
+`workflow_dispatch` and from the runbook at `docs/fork-upstream-sync.md`.
 
 1. `git fetch upstream --tags` and check out a fresh branch from the tag.
 2. Cherry-pick (or rebase) the carried patch series from `fork/main` onto it,
@@ -44,6 +55,10 @@ a tag ships:
    `fork-<full sha>`, not the bare SHA.
 
 Record the new base tag and any dropped or reworked patch in the table below.
+`.github/workflows/fork-upstream-drift.yml` fails when a newer stable tag has
+shipped than both the rebase base recorded here and the "Upstream fixes taken
+through" marker above, or when the table below passes ten rows. The marker
+passing on its own is enough: a cherry-pick does not move the base.
 
 ## Carried patches
 
@@ -75,4 +90,7 @@ registered yet and so cannot be disabled ahead of time: after the next mirror
 sync of `main`, cancel its run and `gh workflow disable postmerge-ci`.
 `fork-release` builds x86_64 only, on the self-hosted GCP `rust-heavy` runner,
 whose image bakes the musl build packages (WI-1514); only its short publish job
-runs GitHub-hosted.
+runs GitHub-hosted. `fork-upstream-drift` is the check that the recorded base tag, or the
+"Upstream fixes taken through" marker, is still the newest stable tag
+(WI-1125). It has no schedule: run it on `workflow_dispatch`, or from the
+sync runbook.

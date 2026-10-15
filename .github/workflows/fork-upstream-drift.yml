@@ -1,0 +1,30 @@
+# Fork-only drift check (WI-1125). Fails when a newer upstream stable tag has
+# shipped than the one recorded in FORK.md and stamped in fork-release.yml, or
+# when the carried-patch table grows past its cap. It reports drift; it does
+# not rebase. New file with a fork-unique name; no upstream workflow is edited.
+name: fork-upstream-drift
+
+# No schedule trigger. GitHub runs schedule only from the repository's default
+# branch, which here is main, the upstream mirror. This file lives on fork/main,
+# so a cron would never fire. Run it with workflow_dispatch, or from the sync
+# runbook at docs/fork-upstream-sync.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: upstream tag and carried-patch cap
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check upstream drift
+        env:
+          UPSTREAM_REMOTE: https://github.com/openai/codex.git
+        run: bash .github/scripts/fork-upstream-drift.sh
