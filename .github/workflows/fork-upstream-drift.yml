@@ -4,10 +4,11 @@
 # not rebase. New file with a fork-unique name; no upstream workflow is edited.
 name: fork-upstream-drift
 
+# No schedule trigger. GitHub runs schedule only from the repository's default
+# branch, which here is main, the upstream mirror. This file lives on fork/main,
+# so a cron would never fire. Run it with workflow_dispatch, or from the sync
+# runbook at docs/fork-upstream-sync.md.
 on:
-  schedule:
-    # Weekly, Monday 06:00 UTC. A new stable tag between runs is caught here.
-    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
