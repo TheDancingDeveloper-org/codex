@@ -529,6 +529,11 @@ impl McpRuntime {
             .any(|server_name| server_names.contains(&server_name))
     }
 
+    /// Names of enabled servers whose startup handshake has not finished yet.
+    pub fn pending_startup_servers(&self) -> Vec<String> {
+        self.current.load().connections.pending_startup_servers()
+    }
+
     /// Waits for the selected server without capturing an execution binding.
     pub async fn wait_for_server_startup(&self, server: &str) {
         self.current
