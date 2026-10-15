@@ -44,6 +44,8 @@ a tag ships:
    `fork-<full sha>`, not the bare SHA.
 
 Record the new base tag and any dropped or reworked patch in the table below.
+`.github/workflows/fork-upstream-drift.yml` fails when a newer stable tag has
+shipped than the one recorded here, or when the table below passes ten rows.
 
 ## Carried patches
 
@@ -75,4 +77,5 @@ registered yet and so cannot be disabled ahead of time: after the next mirror
 sync of `main`, cancel its run and `gh workflow disable postmerge-ci`.
 `fork-release` builds x86_64 only, on the self-hosted GCP `rust-heavy` runner,
 whose image bakes the musl build packages (WI-1514); only its short publish job
-runs GitHub-hosted.
+runs GitHub-hosted. `fork-upstream-drift` is the weekly check that the recorded
+base tag is still the newest stable tag (WI-1125).

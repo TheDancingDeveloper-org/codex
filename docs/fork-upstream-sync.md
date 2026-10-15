@@ -46,3 +46,17 @@ does not move a tag, so older releases keep working after every rebase.
   happened with `mcp-server`, `--full-auto`, `wire_api=chat`, and ghost
   snapshots. A removal means an engine change, not a fork patch that
   reintroduces it.
+
+## Drift check
+
+`.github/scripts/fork-upstream-drift.sh` is the check, and
+`.github/workflows/fork-upstream-drift.yml` runs it weekly and on
+`workflow_dispatch`. It fetches upstream's tags and fails when the newest
+stable `rust-vX.Y.Z` (alpha and dev tags excluded) is newer than the tag
+recorded in `FORK.md` or the `upstream_version` stamp in
+`.github/workflows/fork-release.yml`, and when the carried-patch table grows
+past ten rows. It only reports; the rebase stays the steps above.
+
+Last run, 2026-10-15: drift. `FORK.md` and `fork-release.yml` record
+`rust-v0.162.0`; the newest stable tag on upstream is `rust-v0.162.1`. The
+rebase onto `rust-v0.162.1` is the next sync.
