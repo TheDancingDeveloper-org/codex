@@ -4,8 +4,10 @@ How `fork/main` is rebased onto each new upstream stable tag. The branch model
 and the carried-patch table live in `FORK.md`; this is the runbook.
 
 Upstream shipped 40 stable tags (`rust-v0.144` to `rust-v0.162`) in three
-months and about 1,559 commits in 30 days, so this runs weekly or on every
-stable tag, whichever comes first.
+months and about 1,559 commits in 30 days, so this runs on every stable tag.
+There is no weekly schedule: GitHub runs `schedule` only from the repository's
+default branch, and that branch is `main`, the upstream mirror. The drift
+check below is run on `workflow_dispatch` and by following this runbook.
 
 ## Steps
 
@@ -50,13 +52,19 @@ does not move a tag, so older releases keep working after every rebase.
 ## Drift check
 
 `.github/scripts/fork-upstream-drift.sh` is the check, and
-`.github/workflows/fork-upstream-drift.yml` runs it weekly and on
-`workflow_dispatch`. It fetches upstream's tags and fails when the newest
-stable `rust-vX.Y.Z` (alpha and dev tags excluded) is newer than the tag
-recorded in `FORK.md` or the `upstream_version` stamp in
-`.github/workflows/fork-release.yml`, and when the carried-patch table grows
-past ten rows. It only reports; the rebase stays the steps above.
+`.github/workflows/fork-upstream-drift.yml` runs it on `workflow_dispatch`.
+It has no `schedule` trigger, because that would only fire from `main`. It
+fetches upstream's tags and fails when the newest stable `rust-vX.Y.Z` (alpha
+and dev tags excluded) is newer than both the rebase base recorded in
+`FORK.md` (and the `upstream_version` stamp in
+`.github/workflows/fork-release.yml`) and the separate `Upstream fixes taken
+through:` marker in `FORK.md`. The marker is how a cherry-pick is recorded
+without moving the rebase base. It also fails when the carried-patch table
+grows past ten rows. It only reports; the rebase stays the steps above.
 
-Last run, 2026-10-15: drift. `FORK.md` and `fork-release.yml` record
-`rust-v0.162.0`; the newest stable tag on upstream is `rust-v0.162.1`. The
-rebase onto `rust-v0.162.1` is the next sync.
+Last run, 2026-10-15: `FORK.md` and `fork-release.yml` still record the rebase
+base `rust-v0.162.0`. The newest stable tag on upstream is `rust-v0.162.1`,
+and its three commits are being taken by cherry-pick (a separate WI-1125 pull
+request), not by rebasing `fork/main`, because published `fork-<sha>` tags
+must stay reachable. `FORK.md` records that as `Upstream fixes taken through:
+rust-v0.162.1`.

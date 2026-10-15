@@ -7,9 +7,12 @@
 # needs a person when a patch no longer applies.
 #
 # Two checks:
-#   1. The upstream stable tag recorded in FORK.md and the upstream_version
-#      stamp in .github/workflows/fork-release.yml match the newest rust-vX.Y.Z
-#      tag on the upstream remote. alpha and dev tags are skipped.
+#   1. The newest stable rust-vX.Y.Z tag on the upstream remote (alpha and dev
+#      tags skipped) is recorded either as the rebase base in FORK.md and the
+#      upstream_version stamp in .github/workflows/fork-release.yml, or as the
+#      separate "Upstream fixes taken through" marker in FORK.md. The marker is
+#      for fixes taken by cherry-pick, which does not move the rebase base,
+#      because published fork-<sha> tags must stay reachable.
 #   2. The carried-patch table in FORK.md has at most CARRIED_PATCH_CAP rows
 #      (about 10, the target in FORK.md).
 set -euo pipefail
@@ -38,6 +41,10 @@ recorded_tag="$(
   grep -oE 'rust-v[0-9]+(\.[0-9]+){2}' "$root/FORK.md" |
     head -n1
 )"
+taken_through="$(
+  sed -n 's/^[[:space:]-]*Upstream fixes taken through:[[:space:]]*//p' "$root/FORK.md" |
+    head -n1
+)"
 stamped_version="$(
   sed -n 's/^[[:space:]]*upstream_version="\([0-9][0-9.]*\)".*/\1/p' \
     "$root/.github/workflows/fork-release.yml" |
@@ -45,12 +52,18 @@ stamped_version="$(
 )"
 
 failed=0
-if [[ "$recorded_tag" != "$newest" ]]; then
-  echo "FORK.md records base ${recorded_tag:-<none>}; newest stable tag is ${newest}" >&2
-  failed=1
-fi
-if [[ "$stamped_version" != "$newest_version" ]]; then
-  echo "fork-release.yml stamps upstream_version=${stamped_version:-<none>}; newest is ${newest_version}" >&2
+if [[ "$taken_through" == "$newest" ]]; then
+  echo "FORK.md: upstream fixes taken through ${taken_through} (rebase base ${recorded_tag:-<none>})"
+elif [[ "$recorded_tag" != "$newest" || "$stamped_version" != "$newest_version" ]]; then
+  if [[ "$recorded_tag" != "$newest" ]]; then
+    echo "FORK.md records base ${recorded_tag:-<none>}; newest stable tag is ${newest}" >&2
+  fi
+  if [[ "$stamped_version" != "$newest_version" ]]; then
+    echo "fork-release.yml stamps upstream_version=${stamped_version:-<none>}; newest is ${newest_version}" >&2
+  fi
+  if [[ -n "$taken_through" ]]; then
+    echo "FORK.md upstream fixes taken through ${taken_through}, not ${newest}" >&2
+  fi
   failed=1
 fi
 
