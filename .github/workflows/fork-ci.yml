@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: [fork/main]
   workflow_dispatch:
+    inputs:
+      # Comma-separated package names to check instead of the diff. Used to
+      # measure the baseline on unmodified fork/main, which has no diff.
+      packages:
+        description: Packages to check, overriding the diff
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -30,10 +37,31 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # linux-sandbox's build.rs links libcap through pkg-config.
+      # Same pin upstream uses in rust-ci-full-nextest-platform.yml, so
+      # codex-rs/.config/nextest.toml (serialized test groups, retries, slow
+      # timeouts) applies to the fork's tests too.
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+
+      # linux-sandbox's build.rs links libcap through pkg-config. bubblewrap is
+      # what the sandbox tests actually run.
       - name: Install build libraries
         working-directory: ${{ github.workspace }}
-        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
+
+      # Ubuntu 24.04's AppArmor user-namespace restriction blocks bwrap, so
+      # every sandbox test fails without this. Copied from
+      # .github/actions/setup-ci/action.yml, which upstream's Linux nextest
+      # jobs run before testing.
+      - name: Allow unprivileged user namespaces
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       # Directory names are not package names (app-server-protocol is the
       # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
@@ -42,11 +70,23 @@ jobs:
       # every package.
       - name: Packages changed against fork/main
         id: crates
+        env:
+          FORCED_PACKAGES: ${{ inputs.packages }}
         shell: bash
         run: |
           set -euo pipefail
           base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
           mapfile -t files < <(git diff --name-only "$base"...HEAD)
+          if [[ -n "$FORCED_PACKAGES" ]]; then
+            mapfile -t packages < <(echo "$FORCED_PACKAGES" | tr ',' '\n')
+            echo "forced: ${packages[*]}"
+            {
+              echo "list<<EOF"
+              printf '%s\n' "${packages[@]}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           all=false
           for f in "${files[@]}"; do
             case "$f" in
@@ -95,40 +135,34 @@ jobs:
             cargo fmt -p "$crate" -- --check
           done <<< "${{ steps.crates.outputs.list }}"
 
-      # -D warnings would fail the PR on upstream lint debt in lines it never
+      # -D warnings would fail the PR on upstream lint debt in files it never
       # touched, and a fork patch must not have to fix that. Clippy runs without
-      # it, and only a warning or error whose primary span overlaps a hunk this
-      # PR changed fails the build. Compile errors are fatal regardless, which
+      # it, and only a warning or error whose primary span is in a file this PR
+      # changed fails the build. Compile errors are fatal regardless, which
       # `cargo check` above already enforces.
       - name: cargo clippy
         shell: bash
         run: |
           set -euo pipefail
-          base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
-          # One changed line range per hunk, as "file start count" with the
-          # codex-rs/ prefix stripped. A count of 0 is a pure deletion.
-          git diff -U0 "$base"...HEAD -- codex-rs \
-            | awk '/^diff --git/{file=$4; sub(/^b\/codex-rs\//, "", file)}
-                   /^@@/{split($3,a,","); sub(/^\+/, "", a[1]); print file, a[1], (a[2] == "" ? 1 : a[2])}' \
-            > /tmp/changed-lines
+          printf '%s\n' "${{ steps.crates.outputs.files }}" | sed 's|^codex-rs/||' > /tmp/changed-files
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
             cargo clippy -p "$crate" --all-targets --message-format=json -- -W clippy::all \
               > "/tmp/clippy-${crate}.json" || true
-            # stderr goes to a file synchronously. jq exits 0 on a runtime
-            # error, so without this check a broken filter would pass the gate.
+            # --slurpfile yields an array of strings. Iterating each element
+            # again (`[$changed[][]]`) is a jq runtime error, and jq exits 0 on
+            # those, so the gate would pass every PR. `any` compares strings
+            # directly. stderr goes to a file synchronously: a process
+            # substitution can still be writing when the check runs, which
+            # would let a jq error pass again.
             rm -f /tmp/jq-err
-            offenders="$(jq -r --slurpfile lines <(jq -R 'split(" ") | {file:.[0], start:.[1]|tonumber, count:.[2]|tonumber}' /tmp/changed-lines) '
+            offenders="$(jq -r --slurpfile changed <(jq -R . /tmp/changed-files) '
               select(.reason == "compiler-message")
               | .message
               | select(.level == "warning" or .level == "error")
               | . as $m
               | ($m.spans[] | select(.is_primary)) as $s
-              | select(any($lines[];
-                  .file == $s.file_name
-                  and .count > 0
-                  and $s.line_start <= (.start + .count - 1)
-                  and $s.line_end >= .start))
+              | select(any($changed[]; . == $s.file_name))
               | "\($s.file_name):\($s.line_start):\($s.column_start): \($m.level): \($m.message)"
             ' "/tmp/clippy-${crate}.json" 2>/tmp/jq-err)"
             if [[ -s /tmp/jq-err ]]; then
@@ -138,24 +172,48 @@ jobs:
             fi
             if [[ -n "$offenders" ]]; then
               echo "$offenders"
-              echo "clippy findings in lines this PR changes" >&2
+              echo "clippy findings in files this PR changes" >&2
               exit 1
             fi
           done <<< "${{ steps.crates.outputs.list }}"
 
       - name: cargo test
         shell: bash
+        # codex-core's tests overflow the default thread stack (fatal runtime
+        # error: stack overflow). Upstream sets the same 8 MiB floor on its
+        # test step in rust-ci.yml.
+        env:
+          RUST_MIN_STACK: "8388608"
         run: |
           set -euo pipefail
+          # Tests resolve helper binaries in other packages through
+          # cargo_bin(), and `cargo test -p` never builds another package's
+          # bins, so CARGO_BIN_EXE_* is unset and the lookup in target/debug
+          # misses. Upstream's Bazel build declares them as data deps. Build
+          # every workspace bin once first. codex-voice-host is excluded
+          # because it needs GStreamer >= 1.28, which Ubuntu 24.04 lacks.
+          cargo build --workspace --bins --exclude codex-voice-host
+          # nextest UNIONS multiple -E filtersets, so one `not` per line would
+          # re-include every excluded test as soon as the file has two lines.
+          # Build a single disjunction and omit -E entirely when nothing is
+          # listed.
+          known=()
+          while IFS= read -r line; do
+            line="${line%%#*}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            [[ -z "$line" ]] && continue
+            known+=("(${line})")
+          done < "${GITHUB_WORKSPACE}/.github/fork-ci-known-failures.txt"
+          filter=()
+          if (( ${#known[@]} > 0 )); then
+            joined="$(printf '%s | ' "${known[@]}")"
+            filter=(-E "not (${joined% | })")
+          fi
+          # A failing crate must not hide the rest: the baseline needs every
+          # crate's result, and a PR should see all of its failures at once.
+          status=0
           while IFS= read -r crate; do
             [[ -z "$crate" ]] && continue
-            # packaged_daemon_bootstrap_seeds_local_package asserts
-            # autoUpdateEnabled == false, but default_auto_update_enabled()
-            # returns true in this tree. It fails on unmodified fork/main, so
-            # it is upstream drift rather than anything a fork PR introduced.
-            extra=()
-            if [[ "$crate" == "codex-cli" ]]; then
-              extra+=(-- --skip packaged_daemon_bootstrap_seeds_local_package)
-            fi
-            cargo test -p "$crate" "${extra[@]}"
+            cargo nextest run -p "$crate" "${filter[@]}" || status=1
           done <<< "${{ steps.crates.outputs.list }}"
+          exit "$status"

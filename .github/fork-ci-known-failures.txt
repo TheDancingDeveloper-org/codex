@@ -1,0 +1,3 @@
+# Tests that fail on unmodified fork/main. One nextest filterset per line,
+# with a `#` reason that cites the baseline run showing it fail. A line is
+# only added after that evidence exists; the file starts empty.
