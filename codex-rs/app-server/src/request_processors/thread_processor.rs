@@ -45,10 +45,23 @@ async fn stage_pending_thread_metadata(
     patch: StoreThreadMetadataPatch,
     operation: &'static str,
 ) -> Result<Option<ThreadId>, JSONRPCErrorError> {
+    stage_pending_thread_metadata_with_id(thread_manager, thread_store, patch, operation, None)
+        .await
+}
+
+/// Like [`stage_pending_thread_metadata`], but stages under `thread_id` when the
+/// caller reserved one instead of allocating a fresh id.
+async fn stage_pending_thread_metadata_with_id(
+    thread_manager: &ThreadManager,
+    thread_store: &dyn ThreadStore,
+    patch: StoreThreadMetadataPatch,
+    operation: &'static str,
+    thread_id: Option<ThreadId>,
+) -> Result<Option<ThreadId>, JSONRPCErrorError> {
     if patch.is_empty() {
         return Ok(None);
     }
-    let thread_id = thread_manager.reserve_thread_id();
+    let thread_id = thread_id.unwrap_or_else(|| thread_manager.reserve_thread_id());
     thread_store
         .stage_pending_thread_metadata(thread_id, patch)
         .await
@@ -1124,6 +1137,31 @@ impl ThreadRequestProcessor {
         .await
     }
 
+    /// Parse a caller-chosen thread id and refuse one that is already live or
+    /// already has a persisted rollout, matching resume-by-id semantics.
+    async fn resolve_caller_thread_id(
+        &self,
+        thread_id: &str,
+    ) -> Result<ThreadId, JSONRPCErrorError> {
+        let thread_id = ThreadId::from_string(thread_id)
+            .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
+        if self.thread_manager.get_thread(thread_id).await.is_ok() {
+            return Err(invalid_request("thread already exists"));
+        }
+        if codex_rollout::find_thread_path_by_id_str(
+            &self.config.codex_home,
+            &thread_id.to_string(),
+            self.state_db.as_deref(),
+        )
+        .await
+        .map_err(|err| internal_error(format!("failed to look up thread id: {err}")))?
+        .is_some()
+        {
+            return Err(invalid_request("thread already exists"));
+        }
+        Ok(thread_id)
+    }
+
     async fn thread_start_inner(
         &self,
         request_id: ConnectionRequestId,
@@ -1161,6 +1199,7 @@ impl ThreadRequestProcessor {
             project_id,
             daybreak_enabled,
             environments,
+            thread_id,
         } = params;
         if matches!(
             history_mode,
@@ -1176,6 +1215,12 @@ impl ThreadRequestProcessor {
                 "`permissions` cannot be combined with `sandbox`",
             ));
         }
+        let reserved_thread_id = match thread_id.as_deref() {
+            Some(thread_id) if !thread_id.is_empty() => {
+                Some(self.resolve_caller_thread_id(thread_id).await?)
+            }
+            _ => None,
+        };
         if let Some(project_id) = project_id.as_ref() {
             if project_id.is_empty() {
                 return Err(invalid_request("projectId must not be empty"));
@@ -1247,6 +1292,7 @@ impl ThreadRequestProcessor {
                 thread_source.map(Into::into),
                 project_id,
                 daybreak_enabled,
+                reserved_thread_id,
                 environment_requests,
                 service_name,
                 allow_provider_model_fallback,
@@ -1329,6 +1375,7 @@ impl ThreadRequestProcessor {
         thread_source: Option<codex_protocol::protocol::ThreadSource>,
         project_id: Option<String>,
         daybreak_enabled: Option<bool>,
+        reserved_thread_id: Option<ThreadId>,
         environment_requests: Option<Vec<TurnEnvironmentRequest>>,
         service_name: Option<String>,
         allow_provider_model_fallback: bool,
@@ -1467,11 +1514,12 @@ impl ThreadRequestProcessor {
         if !selected_capability_roots.is_empty() {
             thread_extension_init.insert(selected_capability_roots);
         }
+        let caller_thread_id = reserved_thread_id;
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
             None
         } else {
-            stage_pending_thread_metadata(
+            stage_pending_thread_metadata_with_id(
                 listener_task_context.thread_manager.as_ref(),
                 thread_store.as_ref(),
                 StoreThreadMetadataPatch {
@@ -1480,10 +1528,14 @@ impl ThreadRequestProcessor {
                     ..Default::default()
                 },
                 "thread/start",
+                caller_thread_id,
             )
             .await?
         };
+        // An empty metadata patch stages nothing, so a caller-chosen id still
+        // has to win over a freshly reserved one.
         let thread_id = reserved_thread_id
+            .or(caller_thread_id)
             .unwrap_or_else(|| listener_task_context.thread_manager.reserve_thread_id());
         start_options.reserved_thread_id = Some(thread_id);
         // Startup can prewarm the Responses socket before start_thread returns.

@@ -2023,3 +2023,70 @@ fn broken_mcp_transport_toml() -> &'static str {
     r#"command = "/bin/sh"
 args = ["-c", "exit 1"]"#
 }
+
+/// A caller-chosen v4 UUID is used as the new thread's id, and the same id is
+/// refused once a persisted rollout already exists for it.
+#[tokio::test]
+async fn thread_start_honors_caller_v4_thread_id_and_rejects_existing() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_config_toml_without_approval_policy(codex_home.path(), &server.uri())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+
+    // Version nibble is 4: the host may hand over any UUID version.
+    let caller_id = "11111111-1111-4111-8111-111111111111";
+    let response = mcp
+        .start_thread(ThreadStartParams {
+            thread_id: Some(caller_id.to_string()),
+            ..Default::default()
+        })
+        .await?;
+    assert_eq!(response.thread.id, caller_id);
+
+    // A persisted rollout under that id must be rejected even though no live
+    // thread holds it.
+    let persisted_id = "22222222-2222-4222-8222-222222222222";
+    let rollout_dir = codex_home.path().join("sessions/2025/01/03");
+    std::fs::create_dir_all(&rollout_dir)?;
+    std::fs::write(
+        rollout_dir.join(format!("rollout-2025-01-03T00-00-00-{persisted_id}.jsonl")),
+        "",
+    )?;
+
+    let request_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            thread_id: Some(persisted_id.to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    assert_eq!(error.error.code, INVALID_REQUEST_ERROR_CODE);
+    assert_eq!(error.error.message, "thread already exists");
+
+    let request_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            thread_id: Some("not-a-uuid".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    assert_eq!(error.error.code, INVALID_REQUEST_ERROR_CODE);
+    assert!(
+        error.error.message.starts_with("invalid thread id:"),
+        "unexpected message: {}",
+        error.error.message
+    );
+
+    Ok(())
+}

@@ -34,6 +34,12 @@ pub struct Cli {
     #[clap(skip)]
     pub resume_session_id: Option<String>,
 
+    /// Start a new thread under this id instead of one the server allocates.
+    /// A UUID; refused if a thread with that id already exists, so a host can
+    /// resume the same conversation after hibernating it.
+    #[arg(long = "session-id", value_name = "UUID")]
+    pub session_id: Option<String>,
+
     /// Internal: show all sessions (disables cwd filtering and shows CWD column).
     #[clap(skip)]
     pub resume_show_all: bool,

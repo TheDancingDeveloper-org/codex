@@ -28,6 +28,12 @@ pub struct Cli {
     #[arg(long = "thread-source", value_name = "SOURCE", global = true)]
     pub thread_source: Option<ThreadSource>,
 
+    /// Start a new thread under this id instead of one the server allocates.
+    /// A UUID; refused if a thread with that id already exists, so a host can
+    /// resume the same conversation after hibernating it.
+    #[arg(long = "session-id", value_name = "UUID", global = true)]
+    pub session_id: Option<String>,
+
     /// Request an experimental Cyber access program for this turn (OpenAI provider only).
     /// Omit to use server defaults. Not supported with review; fork requires a prompt.
     #[arg(long, value_enum, value_name = "PROGRAM", global = true)]

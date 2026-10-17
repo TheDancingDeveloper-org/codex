@@ -233,6 +233,7 @@ struct ExecRunArgs {
     skip_git_repo_check: bool,
     stderr_with_ansi: bool,
     thread_source: ThreadSource,
+    session_id: Option<String>,
     cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
 }
 
@@ -269,6 +270,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         strict_config,
         shared,
         thread_source,
+        session_id,
         cyber_access_program,
         skip_git_repo_check,
         ephemeral,
@@ -770,6 +772,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         skip_git_repo_check,
         stderr_with_ansi,
         thread_source: thread_source.map(Into::into).unwrap_or(ThreadSource::User),
+        session_id,
         cyber_access_program: cyber_access_program.map(Into::into),
     })
     .instrument(exec_span)
@@ -872,6 +875,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         skip_git_repo_check,
         stderr_with_ansi,
         thread_source,
+        session_id,
         cyber_access_program,
     } = args;
 
@@ -1055,7 +1059,13 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 .unwrap_or(false);
             (session_configured.thread_id, session_configured)
         } else {
-            let response = start_thread(&client, &mut request_ids, &config, &thread_source)
+            let response = start_thread(
+                &client,
+                &mut request_ids,
+                &config,
+                &thread_source,
+                session_id.clone(),
+            )
                 .await
                 .map_err(anyhow::Error::msg)?;
             let session_configured =
@@ -1151,9 +1161,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             .unwrap_or(false);
         (session_configured.thread_id, session_configured)
     } else {
-        let response = start_thread(&client, &mut request_ids, &config, &thread_source)
-            .await
-            .map_err(anyhow::Error::msg)?;
+        let response = start_thread(
+            &client,
+            &mut request_ids,
+            &config,
+            &thread_source,
+            session_id.clone(),
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
         let session_configured = session_configured_from_thread_start_response(&response, &config)
             .map_err(anyhow::Error::msg)?;
         (session_configured.thread_id, session_configured)
@@ -1411,8 +1427,10 @@ async fn start_thread(
     request_ids: &mut RequestIdSequencer,
     config: &Config,
     thread_source: &ThreadSource,
+    session_id: Option<String>,
 ) -> Result<ThreadStartResponse, String> {
     let mut params = thread_start_params_from_config(config, thread_source);
+    params.thread_id = session_id;
     loop {
         match client
             .request_typed(ClientRequest::ThreadStart {

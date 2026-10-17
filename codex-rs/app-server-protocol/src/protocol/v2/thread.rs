@@ -163,6 +163,14 @@ pub struct ThreadStartParams {
     #[experimental("thread/start.experimentalRawEvents")]
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub experimental_raw_events: bool,
+    /// Caller-chosen id for the new thread, so a host can resume it under an id
+    /// it already owns (e.g. hibernate/resume keyed by the host's session id).
+    /// Must be a UUID that no live or persisted thread already uses. Omitted
+    /// leaves id allocation to the server.
+    #[experimental("thread/start.threadId")]
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]

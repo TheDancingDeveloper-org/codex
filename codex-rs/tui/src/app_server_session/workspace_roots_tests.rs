@@ -186,6 +186,7 @@ async fn embedded_lifecycle_requests_preserve_explicit_workspace_roots() -> Resu
         ThreadParamsMode::Embedded,
         /*remote_cwd_override*/ None,
         /*session_start_source*/ None,
+        /*session_id*/ None,
     );
     let resume = thread_resume_params_from_config(
         config.clone(),

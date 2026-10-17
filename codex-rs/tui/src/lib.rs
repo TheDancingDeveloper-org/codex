@@ -1221,6 +1221,7 @@ async fn run_ratatui_app(
         Ok(Ok(app_server)) => {
             AppServerSession::new(app_server, app_server_target.thread_params_mode())
                 .with_local_codex_home(&initial_config.codex_home)
+                .with_session_id(cli.session_id.clone())
         }
         Ok(Err(err)) => {
             terminal_restore_guard.restore_silently();
@@ -1799,6 +1800,7 @@ async fn run_ratatui_app(
                 startup_account = None;
                 AppServerSession::new(app_server, app_server_target.thread_params_mode())
                     .with_local_codex_home(&config.codex_home)
+                    .with_session_id(cli.session_id.clone())
                     .with_remote_cwd_override(remote_cwd_override.clone())
             }
             Ok(Err(err)) => {
@@ -1883,7 +1885,8 @@ async fn run_ratatui_app(
                 )
                 .await?;
                 app_server = AppServerSession::new(client, app_server_target.thread_params_mode())
-                    .with_local_codex_home(&config.codex_home);
+                    .with_local_codex_home(&config.codex_home)
+                    .with_session_id(cli.session_id.clone());
             }
             #[cfg(target_os = "windows")]
             {

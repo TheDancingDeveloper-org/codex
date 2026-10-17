@@ -331,6 +331,8 @@ pub(crate) struct AppServerSession {
     thread_params_mode: ThreadParamsMode,
     /// Explicit CLI provider selection, distinct from resolved configuration defaults.
     pub(crate) model_provider_override: Option<String>,
+    /// Caller-chosen id for the first thread this session starts (`--session-id`).
+    session_id: Option<String>,
     history_support: ThreadHistorySupport,
     thread_settings_update_supported: bool,
     default_model: Option<String>,
@@ -437,6 +439,7 @@ impl AppServerSession {
             remote_cwd_override: None,
             thread_params_mode,
             model_provider_override: None,
+            session_id: None,
             history_support: ThreadHistorySupport::Paginated,
             thread_settings_update_supported: true,
             default_model: None,
@@ -526,6 +529,7 @@ impl AppServerSession {
             self.thread_params_mode(),
             self.remote_cwd_override(),
             /*session_start_source*/ None,
+            self.session_id.clone(),
         );
         let daybreak_launch_override = config
             .config_layer_stack
@@ -577,6 +581,12 @@ impl AppServerSession {
 
     pub(crate) fn with_remote_cwd_override(mut self, remote_cwd_override: Option<PathBuf>) -> Self {
         self.remote_cwd_override = remote_cwd_override;
+        self
+    }
+
+    /// Id the host wants the first new thread to carry (`--session-id`).
+    pub(crate) fn with_session_id(mut self, session_id: Option<String>) -> Self {
+        self.session_id = session_id;
         self
     }
 
@@ -865,6 +875,7 @@ impl AppServerSession {
             self.thread_params_mode(),
             remote_cwd_override.or(self.remote_cwd_override.as_deref()),
             session_start_source,
+            self.session_id.clone(),
         );
         params.model_provider = self
             .model_provider_override
@@ -1824,6 +1835,7 @@ pub(crate) async fn start_thread_with_request_handle(
         thread_params_mode,
         remote_cwd_override.as_deref(),
         /*session_start_source*/ None,
+        /*session_id*/ None,
     );
     thread_tool_transport.validate_config(&config)?;
     launch_choices.configure(&mut params);
@@ -2144,6 +2156,7 @@ pub(crate) fn thread_start_params_from_config(
     thread_params_mode: ThreadParamsMode,
     remote_cwd_override: Option<&std::path::Path>,
     session_start_source: Option<ThreadStartSource>,
+    session_id: Option<String>,
 ) -> ThreadStartParams {
     let permissions = permissions_selection_from_config(config, thread_params_mode);
     let sandbox = permissions
@@ -2170,6 +2183,7 @@ pub(crate) fn thread_start_params_from_config(
         history_mode: (!config.ephemeral).then_some(ThreadHistoryMode::Paginated),
         session_start_source,
         thread_source: Some(ThreadSource::User),
+        thread_id: session_id,
         developer_instructions: with_terminal_visualization_instructions(
             config, /*control_instructions*/ None,
         ),
@@ -2924,6 +2938,7 @@ mod tests {
             ThreadParamsMode::Embedded,
             /*remote_cwd_override*/ None,
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
 
         assert_eq!(params.ephemeral, Some(true));
@@ -2974,6 +2989,7 @@ mod tests {
             ThreadParamsMode::Remote,
             /*remote_cwd_override*/ None,
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
 
         let overrides = params.config.expect("config overrides");
@@ -3036,6 +3052,7 @@ mod tests {
             ThreadParamsMode::Embedded,
             /*remote_cwd_override*/ None,
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
 
         assert_eq!(params.cwd, Some(config.cwd.to_string_lossy().to_string()));
@@ -3066,6 +3083,7 @@ mod tests {
             ThreadParamsMode::Embedded,
             /*remote_cwd_override*/ None,
             Some(ThreadStartSource::Clear),
+            /*session_id*/ None,
         );
 
         assert_eq!(params.session_start_source, Some(ThreadStartSource::Clear));
@@ -3283,6 +3301,7 @@ mod tests {
             ThreadParamsMode::Remote,
             /*remote_cwd_override*/ None,
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
         let resume = thread_resume_params_from_config(
             config.clone(),
@@ -3426,6 +3445,7 @@ mod tests {
             ThreadParamsMode::Remote,
             Some(remote_cwd.as_path()),
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
         let resume = thread_resume_params_from_config(
             config.clone(),
@@ -3481,6 +3501,7 @@ mod tests {
             ThreadParamsMode::Embedded,
             /*remote_cwd_override*/ None,
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
         let resume = thread_resume_params_from_config(
             config.clone(),
@@ -4012,6 +4033,7 @@ mod tests {
             ThreadParamsMode::Embedded,
             /*remote_cwd_override*/ None,
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
         let control_resume = thread_resume_params_from_config(
             config.clone(),
@@ -4043,6 +4065,7 @@ mod tests {
             ThreadParamsMode::Embedded,
             /*remote_cwd_override*/ None,
             /*session_start_source*/ None,
+            /*session_id*/ None,
         );
         let treatment_resume = thread_resume_params_from_config(
             config.clone(),
