@@ -94,3 +94,8 @@ runs GitHub-hosted. `fork-upstream-drift` is the check that the recorded base ta
 "Upstream fixes taken through" marker, is still the newest stable tag
 (WI-1125). It has no schedule: run it on `workflow_dispatch`, or from the
 sync runbook.
+
+`fork-ci` supports a merge queue (`merge_group`), skips its Rust steps when a
+PR touches nothing under `codex-rs/` or `.github/`, and cancels superseded runs
+per ref. How it runs on PRs, in the queue, and around upstream syncs:
+`docs/ci.md`.
