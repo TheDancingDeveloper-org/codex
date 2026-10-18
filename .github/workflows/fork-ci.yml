@@ -6,6 +6,10 @@ name: fork-ci
 on:
   pull_request:
     branches: [fork/main]
+  # The merge queue (WI-1886, docs/ci.md). The queue tests the tree fork/main
+  # will become, so a PR never has to be rebased onto a sibling's merge.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       # Comma-separated package names to check instead of the diff. Used to
@@ -17,6 +21,12 @@ on:
 
 permissions:
   contents: read
+
+# A force-push cancels the superseded run. Each queue entry has its own
+# gh-readonly-queue/... ref, so queue entries never cancel each other.
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -106,11 +116,27 @@ jobs:
         id: crates
         env:
           FORCED_PACKAGES: ${{ inputs.packages }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
+          # In the queue, diff the whole group against the queue's base: every
+          # PR ahead of this one in the group is part of the tree under test.
+          if [[ -n "$QUEUE_BASE" ]]; then
+            base="$QUEUE_BASE"
+          else
+            base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
+          fi
           mapfile -t files < <(git diff --name-only "$base"...HEAD)
+          # Path scope: a diff with nothing under codex-rs/ or .github/ (docs,
+          # FORK.md, sdk/) skips the Rust steps. The job still reports, so a
+          # required check is satisfied.
+          rust=false
+          for f in "${files[@]}"; do
+            case "$f" in codex-rs/*|.github/*) rust=true ;; esac
+          done
+          [[ -n "$FORCED_PACKAGES" ]] && rust=true
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
           if [[ -n "$FORCED_PACKAGES" ]]; then
             mapfile -t packages < <(echo "$FORCED_PACKAGES" | tr ',' '\n')
             echo "forced: ${packages[*]}"
@@ -194,6 +220,7 @@ jobs:
       # the Codex-built artifacts from the upstream release and verifies them
       # against the in-tree checksum manifest, the same as fork-release.
       - name: Configure rusty_v8 artifact overrides and verify checksums
+        if: steps.crates.outputs.rust == 'true'
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: x86_64-unknown-linux-gnu
@@ -203,9 +230,11 @@ jobs:
       # apt package satisfies it. Upstream never builds it with cargo either; it
       # builds //codex-rs/voice-host with Bazel against a bundled GStreamer.
       - name: cargo check
+        if: steps.crates.outputs.rust == 'true'
         run: cargo check --workspace --all-targets --exclude codex-voice-host
 
       - name: cargo fmt
+        if: steps.crates.outputs.rust == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -221,10 +250,13 @@ jobs:
       # PR changed fails the build. Compile errors are fatal regardless, which
       # `cargo check` above already enforces.
       - name: cargo clippy
+        if: steps.crates.outputs.rust == 'true'
         shell: bash
+        env:
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
+          base="${QUEUE_BASE:-$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)}"
           # One changed line range per hunk, as "file start count" with the
           # codex-rs/ prefix stripped. A count of 0 is a pure deletion.
           git diff -U0 "$base"...HEAD -- codex-rs \
@@ -274,6 +306,7 @@ jobs:
           fi
 
       - name: cargo test
+        if: steps.crates.outputs.rust == 'true'
         shell: bash
         # codex-core's tests overflow the default thread stack (fatal runtime
         # error: stack overflow). Upstream sets the same 8 MiB floor on its
