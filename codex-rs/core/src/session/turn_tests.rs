@@ -111,3 +111,65 @@ fn realtime_user_verification_notice_excludes_request_payload() {
         )),
     );
 }
+
+fn token_status_for_prompt_check(
+    scope_limit: Option<i64>,
+    prefill: Option<i64>,
+    context_window: Option<i64>,
+) -> super::super::context_window::ContextWindowTokenStatus {
+    super::super::context_window::ContextWindowTokenStatus {
+        active_context_tokens: 0,
+        auto_compact_scope_tokens: 0,
+        auto_compact_scope_limit: scope_limit,
+        full_context_window_limit: context_window,
+        base_window_tokens_remaining: None,
+        auto_compact_window_prefill_tokens: prefill,
+        full_context_window_limit_reached: false,
+        token_limit_reached: true,
+        turn_end_compaction_threshold_reached: false,
+    }
+}
+
+#[test]
+fn prompt_over_limit_detects_a_prefix_that_compaction_cannot_shrink() {
+    // WI-2832: a 130.5k-token prompt after compaction against a 128k limit.
+    let status = token_status_for_prompt_check(Some(128_000), None, Some(258_400));
+    assert!(prompt_over_limit(
+        AutoCompactTokenLimitScope::Total,
+        130_516,
+        &status
+    ));
+    // A normal post-compaction prompt leaves room for the turn to make progress.
+    assert!(!prompt_over_limit(
+        AutoCompactTokenLimitScope::Total,
+        43_000,
+        &status
+    ));
+}
+
+#[test]
+fn prompt_over_limit_ignores_the_prefix_for_body_after_prefix_scope() {
+    let status = token_status_for_prompt_check(Some(20_000), Some(110_000), Some(258_400));
+    assert!(!prompt_over_limit(
+        AutoCompactTokenLimitScope::BodyAfterPrefix,
+        125_000,
+        &status
+    ));
+    assert!(prompt_over_limit(
+        AutoCompactTokenLimitScope::BodyAfterPrefix,
+        130_000,
+        &status
+    ));
+    // Without a recorded prefix the body cannot be measured; only the hard window applies.
+    let status = token_status_for_prompt_check(Some(20_000), None, Some(100_000));
+    assert!(!prompt_over_limit(
+        AutoCompactTokenLimitScope::BodyAfterPrefix,
+        90_000,
+        &status
+    ));
+    assert!(prompt_over_limit(
+        AutoCompactTokenLimitScope::BodyAfterPrefix,
+        100_000,
+        &status
+    ));
+}
