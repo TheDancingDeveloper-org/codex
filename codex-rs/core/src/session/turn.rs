@@ -180,14 +180,17 @@ pub(crate) async fn run_turn(
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively
     // when they would push the thread over the compaction threshold.
-    if let Err(err) = run_pre_sampling_compact(
+    let pre_sampling_compact = run_pre_sampling_compact(
         &sess,
         &turn_context,
         &mut client_session,
         &cancellation_token,
     )
-    .await
-    {
+    .await;
+    // Set when a context-limit compaction ran and the next sampling request has not been
+    // checked against the limit yet (see `compaction_left_prompt_over_limit`).
+    let mut context_limit_compaction_pending_check = matches!(pre_sampling_compact, Ok(true));
+    if let Err(err) = pre_sampling_compact {
         // Compaction runs before the new input is recorded, so preserve it on every failure.
         run_hooks_and_record_inputs(
             &sess,
@@ -616,7 +619,56 @@ pub(crate) async fn run_turn(
                 )
                 .await;
 
-                // as long as compaction works well in getting us way below the token limit, we shouldn't worry about being in an infinite loop.
+                // Compacting again cannot help when the first request after a compaction was
+                // already over the limit: the part compaction cannot shrink (tool specs,
+                // instructions, retained context) fills the window by itself. End the turn with
+                // an error instead of looping compaction -> one step -> compaction.
+                let compaction_pending_check =
+                    std::mem::take(&mut context_limit_compaction_pending_check);
+                if should_roll_over
+                    && token_limit_reached
+                    && compaction_pending_check
+                    && let Some(prompt_tokens) = compaction_left_prompt_over_limit(
+                        sess.as_ref(),
+                        turn_context.config.model_auto_compact_token_limit_scope,
+                        &token_status,
+                    )
+                    .await
+                {
+                    let limit = token_status
+                        .auto_compact_scope_limit
+                        .or(token_status.full_context_window_limit)
+                        .unwrap_or_default();
+                    warn!(
+                        turn_id = %turn_context.sub_id,
+                        prompt_tokens,
+                        limit,
+                        "auto-compaction left the prompt over the limit; not compacting again"
+                    );
+                    sess.send_event(
+                        &turn_context,
+                        EventMsg::Warning(WarningEvent {
+                            message: format!(
+                                "Auto-compaction could not bring the context below the limit: the first request after compaction used {prompt_tokens} prompt tokens against a limit of {limit}. What compaction cannot shrink (tool definitions, instructions, retained context) is too large for this limit, so Codex stopped instead of compacting again. Reduce the enabled MCP servers or tools, or raise model_auto_compact_token_limit."
+                            ),
+                        }),
+                    )
+                    .await;
+                    let err = CodexErr::ContextWindowExceeded;
+                    sess.emit_turn_error_lifecycle(
+                        turn_context.as_ref(),
+                        err.to_codex_protocol_error(),
+                        err.details(),
+                    )
+                    .await;
+                    sess.send_event(
+                        turn_context.as_ref(),
+                        EventMsg::Error(err.to_error_event(/*message_prefix*/ None)),
+                    )
+                    .await;
+                    return Ok(None);
+                }
+
                 if should_roll_over {
                     if let Err(err) = run_auto_compact(
                         &sess,
@@ -640,6 +692,7 @@ pub(crate) async fn run_turn(
                         .await;
                         return Ok(None);
                     }
+                    context_limit_compaction_pending_check = token_limit_reached;
                     if run_pending_session_start_hooks(&sess, &turn_context).await {
                         return Ok(None);
                     }
@@ -1305,7 +1358,7 @@ async fn run_pre_sampling_compact(
     turn_context: &Arc<TurnContext>,
     client_session: &mut ModelClientSession,
     cancellation_token: &CancellationToken,
-) -> CodexResult<()> {
+) -> CodexResult<bool> {
     maybe_run_previous_model_inline_compact(sess, turn_context, client_session, cancellation_token)
         .await?;
     let token_status =
@@ -1326,8 +1379,44 @@ async fn run_pre_sampling_compact(
             CompactionPhase::PreTurn,
         )
         .await?;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
+}
+
+/// Returns the prompt size of the last sampling request when that prompt alone already
+/// reached the auto-compaction limit (or the usable context window).
+///
+/// Called for the first request after a context-limit compaction: if its prompt is still
+/// over the limit, another compaction would produce the same prompt again.
+async fn compaction_left_prompt_over_limit(
+    sess: &Session,
+    scope: AutoCompactTokenLimitScope,
+    token_status: &super::context_window::ContextWindowTokenStatus,
+) -> Option<i64> {
+    let prompt_tokens = sess.token_usage_info().await?.last_token_usage.input_tokens;
+    prompt_over_limit(scope, prompt_tokens, token_status).then_some(prompt_tokens)
+}
+
+fn prompt_over_limit(
+    scope: AutoCompactTokenLimitScope,
+    prompt_tokens: i64,
+    token_status: &super::context_window::ContextWindowTokenStatus,
+) -> bool {
+    let scope_prompt_tokens = match scope {
+        AutoCompactTokenLimitScope::Total => Some(prompt_tokens),
+        // The prefix does not count against this scope; compare only the body after it.
+        AutoCompactTokenLimitScope::BodyAfterPrefix => token_status
+            .auto_compact_window_prefill_tokens
+            .map(|prefill| prompt_tokens.saturating_sub(prefill)),
+    };
+    let over_scope_limit = scope_prompt_tokens
+        .zip(token_status.auto_compact_scope_limit)
+        .is_some_and(|(tokens, limit)| tokens >= limit);
+    let over_context_window = token_status
+        .full_context_window_limit
+        .is_some_and(|limit| prompt_tokens >= limit);
+    over_scope_limit || over_context_window
 }
 
 /// Returns true only when both turns declare compaction compatibility hashes and they differ.

@@ -93,6 +93,22 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
 
+      # The `rust-heavy` label is also served by container runners (for example
+      # nodef-gha-public-docker) that lack the baked packages, so codex-bwrap's
+      # build.rs fails on "libcap not available via pkg-config". Those runners
+      # may run as root with no sudo. Skip when libcap is already present (the
+      # baked rust-heavy image, whose jobs have no sudo).
+      - name: Install build libraries on self-hosted runners
+        if: runner.environment == 'self-hosted'
+        working-directory: ${{ github.workspace }}
+        run: |
+          if command -v pkg-config >/dev/null && pkg-config --exists libcap; then
+            echo "libcap already available via pkg-config"
+            exit 0
+          fi
+          SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
+          $SUDO apt-get update && $SUDO apt-get install -y libcap-dev pkg-config
+
       # Ubuntu 24.04's AppArmor user-namespace restriction blocks bwrap, so
       # every sandbox test fails without this. Copied from
       # .github/actions/setup-ci/action.yml, which upstream's Linux nextest

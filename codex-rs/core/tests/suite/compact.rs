@@ -4560,6 +4560,91 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
     );
 }
 
+/// WI-2832: when the part of the prompt that compaction cannot shrink (tool specs,
+/// instructions) is already over `model_auto_compact_token_limit`, every request after a
+/// compaction is over the limit again. Codex used to loop compaction -> one tool call ->
+/// compaction until the session was stopped (235 compactions in one turn). The turn must
+/// stop after the first ineffective compaction instead.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_compact_stops_when_compaction_cannot_get_below_limit() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+
+    let over_limit_step = || {
+        sse(vec![
+            ev_function_call(DUMMY_CALL_ID, DUMMY_FUNCTION_NAME, "{}"),
+            ev_completed_with_tokens("over-limit", /*total_tokens*/ 400),
+        ])
+    };
+    let summary_step = || {
+        sse(vec![
+            ev_assistant_message("summary", &auto_summary(AUTO_SUMMARY_TEXT)),
+            ev_completed_with_tokens("summary", /*total_tokens*/ 50),
+        ])
+    };
+    // One step, one compaction, one step. The old loop compacted again here; the sequence
+    // has no fourth response, so a further request fails the turn with a different error.
+    let request_log = mount_sse_sequence(
+        &server,
+        vec![over_limit_step(), summary_step(), over_limit_step()],
+    )
+    .await;
+
+    let model_provider = non_openai_model_provider(&server);
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            set_test_compact_prompt(config);
+            config.model_auto_compact_token_limit = Some(300);
+        })
+        .build(&server)
+        .await
+        .unwrap()
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: FUNCTION_CALL_LIMIT_MSG.into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+    let turn_error = loop {
+        match wait_for_event(&codex, |_| true).await {
+            EventMsg::Warning(WarningEvent { message }) => warnings.push(message),
+            EventMsg::Error(error) => errors.push(error.codex_error_info),
+            EventMsg::TurnComplete(event) => {
+                break event.error.and_then(|error| error.codex_error_info);
+            }
+            _ => {}
+        }
+    };
+
+    assert_eq!(turn_error, Some(CodexErrorInfo::ContextWindowExceeded));
+    assert_eq!(errors, vec![Some(CodexErrorInfo::ContextWindowExceeded)]);
+    assert!(
+        warnings.iter().any(|message| message
+            .contains("Auto-compaction could not bring the context below the limit")
+            && message.contains("400 prompt tokens against a limit of 300")),
+        "expected an ineffective-compaction warning, got {warnings:?}"
+    );
+
+    let requests = request_log.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "expected one step, one compaction and one step, then a stop"
+    );
+    assert!(body_contains_text(
+        &requests[1].body_json().to_string(),
+        SUMMARIZATION_PROMPT
+    ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn paginated_compaction_cold_resume_from_bounded_suffix() -> Result<()> {
     skip_if_no_network!(Ok(()));
