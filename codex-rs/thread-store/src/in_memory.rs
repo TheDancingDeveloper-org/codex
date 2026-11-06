@@ -64,6 +64,7 @@ mod tests {
     use crate::StoredTurnItemsView;
     use crate::ThreadPersistenceMetadata;
     use crate::ThreadSortKey;
+    use codex_protocol::ContextWindowId;
     use codex_protocol::models::BaseInstructions;
     use codex_protocol::protocol::SessionSource;
 
@@ -128,6 +129,7 @@ mod tests {
 
         let items_err = store
             .list_items(ListItemsParams {
+                item_ids: None,
                 thread_id,
                 turn_id: None,
                 include_archived: true,
@@ -165,6 +167,7 @@ mod tests {
         ] {
             store
                 .create_thread(CreateThreadParams {
+                    attached_thread: false,
                     creator_user_id: None,
                     creator_account_id: None,
                     session_id: thread_id.into(),
@@ -182,7 +185,7 @@ mod tests {
                     history_mode: ThreadHistoryMode::Legacy,
                     history_base: None,
                     subagent_history_start_ordinal: None,
-                    initial_window_id: uuid::Uuid::now_v7().to_string(),
+                    initial_window_id: ContextWindowId::new_uuid_v7().to_string(),
                     runtime_workspace_roots: None,
                     metadata: ThreadPersistenceMetadata {
                         cwd: None,
@@ -441,6 +444,7 @@ mod tests {
         history_mode: ThreadHistoryMode,
     ) -> CreateThreadParams {
         CreateThreadParams {
+            attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
@@ -458,7 +462,7 @@ mod tests {
             history_mode,
             history_base: None,
             subagent_history_start_ordinal: None,
-            initial_window_id: uuid::Uuid::now_v7().to_string(),
+            initial_window_id: ContextWindowId::new_uuid_v7().to_string(),
             runtime_workspace_roots: None,
             metadata: thread_metadata(),
         }
@@ -526,6 +530,7 @@ pub struct InMemoryThreadStore {
 #[derive(Default)]
 struct InMemoryThreadStoreState {
     calls: InMemoryThreadStoreCalls,
+    repeated_list_threads_cursor: Option<String>,
     created_threads: HashMap<ThreadId, CreateThreadParams>,
     histories: HashMap<ThreadId, Vec<RolloutItem>>,
     metadata_updates: HashMap<ThreadId, ThreadMetadataPatch>,
@@ -566,6 +571,11 @@ impl InMemoryThreadStore {
         self.state.lock().await.calls.clone()
     }
 
+    /// Makes every thread-list page return the same cursor for public API error-path tests.
+    pub async fn repeat_list_threads_cursor_for_testing(&self, cursor: impl Into<String>) {
+        self.state.lock().await.repeated_list_threads_cursor = Some(cursor.into());
+    }
+
     /// Makes metadata updates apply normally while returning no materialized thread.
     pub fn omit_metadata_update_result_for_testing(&self) {
         self.omit_metadata_update_result
@@ -576,6 +586,7 @@ impl InMemoryThreadStore {
         let mut state = self.state.lock().await;
         state.calls.create_thread += 1;
         let session_meta = SessionMeta {
+            attached_thread: params.attached_thread,
             session_id: params.session_id,
             id: params.thread_id,
             forked_from_id: params.forked_from_id,
@@ -610,10 +621,10 @@ impl InMemoryThreadStore {
             .histories
             .entry(params.thread_id)
             .or_default()
-            .push(RolloutItem::SessionMeta(SessionMetaLine {
+            .push(RolloutItem::SessionMeta(Box::new(SessionMetaLine {
                 meta: session_meta,
                 git: None,
-            }));
+            })));
         state.created_threads.insert(params.thread_id, params);
         Ok(())
     }
@@ -753,7 +764,7 @@ impl InMemoryThreadStore {
         items.sort_by_key(|item| item.thread_id.to_string());
         Ok(ThreadPage {
             items,
-            next_cursor: None,
+            next_cursor: state.repeated_list_threads_cursor.clone(),
         })
     }
 
@@ -995,6 +1006,11 @@ impl ThreadStore for InMemoryThreadStore {
                     page.items
                         .retain(|thread| thread.parent_thread_id == Some(parent_thread_id));
                 }
+                Some(ThreadRelationFilter::AttachedThreadsOf(_)) => {
+                    return Err(ThreadStoreError::Unsupported {
+                        operation: "attached threads",
+                    });
+                }
                 Some(ThreadRelationFilter::DescendantsOf(ancestor_thread_id)) => {
                     let mut subtree = HashSet::from([ancestor_thread_id]);
                     loop {
@@ -1100,6 +1116,14 @@ fn stored_thread_from_state(
         });
 
     Ok(StoredThread {
+        creator_user_id: created
+            .creator_user_id
+            .clone()
+            .or_else(|| metadata.and_then(|metadata| metadata.creator_user_id.clone())),
+        creator_account_id: created
+            .creator_account_id
+            .clone()
+            .or_else(|| metadata.and_then(|metadata| metadata.creator_account_id.clone())),
         originator: (!created.originator.is_empty()).then(|| created.originator.clone()),
         thread_id,
         extra_config: created.extra_config.clone(),
