@@ -13,12 +13,19 @@ core edits.
 - `main` is a pure mirror of upstream `main`. Nothing fork-specific is ever
   committed to it, and it is never the base of a fork pull request.
 - `fork/main` is the fork line: an upstream stable tag plus the carried patch
-  series. It currently sits on `c1382380d`, the commit of upstream tag
-  `rust-v0.162.0`.
-- Upstream fixes taken through: rust-v0.162.1
-  This line is separate from the rebase base above. It records fixes taken by
-  cherry-pick, which does not move `fork/main`, because published `fork-<sha>`
-  tags must stay reachable. The two fix commits are `f715d50688` (daemon
+  series. Its last tag-based rebase was onto `c1382380d`, the commit of
+  upstream tag `rust-v0.162.0`; PR #37 subsequently merged upstream `main` as
+  recorded below.
+- Release compatibility base: rust-v0.167.0. The merged upstream tree is 422
+  commits past its merge base with that stable release branch and contains
+  later upstream `main` work; the release branch has three commits not on
+  `main`. Fork releases therefore use the latest stable version, `0.167.0`,
+  rather than an alpha version or upstream `main`'s development `0.0.0`.
+- Upstream fixes taken through: rust-v0.167.0
+  This line is separate from the historical rebase base above. It records the
+  release compatibility of upstream changes incorporated without rebasing,
+  because published `fork-<sha>` tags must stay reachable. Before PR #37, the
+  two fixes taken by cherry-pick were `f715d50688` (daemon
   feature compatibility checks only on explicit CLI overrides, #52648) and
   `1a1335eefe` (multiline async questions keep line breaks and links, #51866).
   The tag commit `092d3acd6b` is not taken: it only bumps the workspace version
@@ -29,10 +36,9 @@ core edits.
 - Sync record: PR #37 merges `upstream/main` into `fork/main` instead of
   rebasing onto a stable tag (latest merge `6dfaca4dad`, 2026-11-10). This is
   a deliberate deviation from this section while the rebase is outstanding:
-  the base markers above stay at `rust-v0.162.0`, so a release cut from the
-  merge reports `0.162.0+fork.<sha>` even though the tree carries code from
-  after `rust-v0.167.0`. Update the markers with the next rebase, or restamp
-  `upstream_version` in `.github/workflows/fork-release.yml`.
+  the historical rebase base remains `rust-v0.162.0`, while the release
+  compatibility marker and `upstream_version` stamp are `rust-v0.167.0`.
+  Thus a release cut from the merged tree reports `0.167.0+fork.<sha>`.
 - All fork work branches off `fork/main` and every fork pull request targets
   `fork/main`. Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
