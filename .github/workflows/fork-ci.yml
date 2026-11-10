@@ -279,7 +279,11 @@ jobs:
           # cargo-timing.html, which the next cargo step overwrites, so copy it
           # aside immediately.
           mkdir -p /tmp/cargo-timings
-          cargo clippy "${args[@]}" --all-targets --timings --message-format=json -- -W clippy::all \
+          # Two jobs, not the runner's four: a whole-workspace --all-targets
+          # clippy peaks above the runner's 11 GiB memory limit at full width
+          # (ci-k8s-1 was OOMKilled mid-clippy, WI-3954). Two rustc at a time
+          # keeps the peak under the limit.
+          cargo clippy "${args[@]}" --all-targets --jobs 2 --timings --message-format=json -- -W clippy::all \
             > /tmp/clippy.json || true
           [[ -f cargo-timing.html ]] && cp cargo-timing.html /tmp/cargo-timings/clippy-timing.html
           # The gate is by changed hunk, so it reads the whole stream once.
