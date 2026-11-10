@@ -205,6 +205,12 @@ jobs:
           fi
           # Unique, stable order.
           mapfile -t packages < <(printf '%s\n' "${packages[@]}" | awk 'NF && !seen[$0]++')
+          # codex-voice-host is the only package that pulls in GStreamer, and it
+          # needs gstreamer-1.0 >= 1.28 while Ubuntu 24.04 ships 1.24, so no apt
+          # package satisfies it. Every other Rust step excludes it; drop it here
+          # as well, or nextest builds it through its -p list and the whole job
+          # fails on glib-2.0.pc.
+          mapfile -t packages < <(printf '%s\n' "${packages[@]}" | awk '$0 != "codex-voice-host"')
           echo "changed: ${packages[*]:-none}"
           {
             echo "list<<EOF"
