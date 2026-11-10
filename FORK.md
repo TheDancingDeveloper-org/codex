@@ -26,6 +26,13 @@ core edits.
   `fork/wi-1125-upstream-0-162-1`. The tag lives on a release branch, not on
   upstream `main`: `2351d9e1b` (upstream `main` at fork time) is 114 commits
   away and not descended from the tag, so it is not a valid base.
+- Sync record: PR #37 merges `upstream/main` into `fork/main` instead of
+  rebasing onto a stable tag (latest merge `6dfaca4dad`, 2026-11-10). This is
+  a deliberate deviation from this section while the rebase is outstanding:
+  the base markers above stay at `rust-v0.162.0`, so a release cut from the
+  merge reports `0.162.0+fork.<sha>` even though the tree carries code from
+  after `rust-v0.167.0`. Update the markers with the next rebase, or restamp
+  `upstream_version` in `.github/workflows/fork-release.yml`.
 - All fork work branches off `fork/main` and every fork pull request targets
   `fork/main`. Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
