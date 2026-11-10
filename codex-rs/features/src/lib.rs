@@ -128,7 +128,7 @@ pub enum Feature {
     TuiMultiBackend,
     /// Enable workspace behavior for side conversations in the owned TUI.
     TuiWorkspace,
-    /// Render the configured status line through the experimental TUI Extensions renderer.
+    /// Enable experimental MCP status line providers.
     TuiExtensionsStatusLine,
     /// Enable negotiated zstd compression for app-server WebSocket and UDS connections.
     AppServerWebSocketCompression,
@@ -286,6 +286,8 @@ pub enum Feature {
     McpToolListChanged,
     /// Discover and share eligible local stdio connections across chats.
     McpConnectionSharing,
+    /// Defer optional stdio server startup in regular chats with a warm tool catalog.
+    McpLazyStdioStartup,
     /// Enable MCP protocol version 2026-07-28 for the host-owned Codex Apps server.
     CodexAppsMcp20260728,
     /// Let host-owned Apps catalog reads overlap the initial tool inventory.
@@ -306,6 +308,8 @@ pub enum Feature {
     CommandSessionsWorldState,
     /// Track top-level tool definitions in world state and emit incremental context updates.
     IncrementalTools,
+    /// Publish incremental tool declarations on regular Amazon Bedrock Responses.
+    IncrementalToolsLegacy,
     /// Suppress the model ID announcement in incremental context after a model switch.
     SuppressModelChangeAnnouncements,
     /// Preserve inherited tool declarations in MCP-disabled prediction forks.
@@ -475,6 +479,8 @@ pub enum Feature {
     BedrockSetupWizard,
     /// Offer Google Cloud Vertex AI setup during TUI sign-in onboarding.
     GcpSetupWizard,
+    /// Offer custom gateway setup during TUI sign-in onboarding.
+    GatewaySetupWizard,
     /// Removed compatibility flag retained as a no-op.
     Personality,
     /// Enable native artifact tools.
@@ -1277,8 +1283,8 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::UntrustedAsToolOutput,
         key: "untrusted_as_tool_output",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ExecutedToolCallMetadata,
@@ -1319,14 +1325,14 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::CodeModeHostGrpc,
         key: "code_mode_host_grpc",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::CodeModeHostOutputTruncation,
         key: "code_mode_host_output_truncation",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::CodeModePrewarm,
@@ -1739,6 +1745,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::McpLazyStdioStartup,
+        key: "mcp_lazy_stdio_startup",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::AppsEarlyResourceDiscovery,
         key: "apps_early_resource_discovery",
         stage: Stage::UnderDevelopment,
@@ -1797,6 +1809,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "incremental_tools",
         stage: Stage::Stable,
         default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::IncrementalToolsLegacy,
+        key: "incremental_tools_legacy",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::SuppressModelChangeAnnouncements,
@@ -2251,6 +2269,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::GcpSetupWizard,
         key: "gcp_setup_wizard",
+        stage: Stage::Stable,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::GatewaySetupWizard,
+        key: "gateway_setup_wizard",
         stage: Stage::Stable,
         default_enabled: false,
     },

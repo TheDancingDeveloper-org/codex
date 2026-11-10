@@ -80,7 +80,6 @@ fn validate_response_item_image_urls(items: &[ResponseItem]) -> Result<(), JSONR
 
 #[derive(Clone)]
 pub(crate) struct TurnRequestProcessor {
-    auth_manager: Arc<AuthManager>,
     thread_manager: Arc<ThreadManager>,
     outgoing: Arc<OutgoingMessageSender>,
     analytics_events_client: AnalyticsEventsClient,
@@ -139,7 +138,6 @@ struct ThreadSettingsBuildParams {
 impl TurnRequestProcessor {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        auth_manager: Arc<AuthManager>,
         thread_manager: Arc<ThreadManager>,
         outgoing: Arc<OutgoingMessageSender>,
         analytics_events_client: AnalyticsEventsClient,
@@ -152,7 +150,6 @@ impl TurnRequestProcessor {
         turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
     ) -> Self {
         Self {
-            auth_manager,
             thread_manager,
             outgoing,
             analytics_events_client,
@@ -745,7 +742,6 @@ impl TurnRequestProcessor {
             if config_snapshot.is_primary_environment_configured() {
                 codex_memories_write::start_memories_startup_task(
                     Arc::clone(&self.thread_manager),
-                    Arc::clone(&self.auth_manager),
                     thread_id,
                     Arc::clone(&thread),
                     thread.config().await,
@@ -1067,16 +1063,8 @@ impl TurnRequestProcessor {
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
     ) -> Result<(), JSONRPCErrorError> {
-        let mcp_elicitations_auto_deny = xcode_26_4_mcp_elicitations_auto_deny(
-            app_server_client_name.as_deref(),
-            app_server_client_version.as_deref(),
-        );
         thread
-            .set_app_server_client_info(
-                app_server_client_name,
-                app_server_client_version,
-                mcp_elicitations_auto_deny,
-            )
+            .set_app_server_client_info(app_server_client_name, app_server_client_version)
             .await
             .map_err(|err| internal_error(format!("failed to set app server client info: {err}")))
     }
@@ -1565,15 +1553,4 @@ impl TurnRequestProcessor {
         )
         .await
     }
-}
-
-fn xcode_26_4_mcp_elicitations_auto_deny(
-    client_name: Option<&str>,
-    client_version: Option<&str>,
-) -> bool {
-    // Xcode 26.4 shipped before app-server MCP elicitation requests were
-    // client-visible. Keep elicitations auto-denied for that client line.
-    // TODO: Remove this compatibility hack once Xcode 26.4 ages out.
-    client_name == Some("Xcode")
-        && client_version.is_some_and(|version| version.starts_with("26.4"))
 }

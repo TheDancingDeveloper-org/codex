@@ -1176,14 +1176,17 @@ async fn thread_list_db_only_errors_distinguish_unavailable_database_from_empty_
     let other_home = TempDir::new()?;
     create_minimal_config(home.path())?;
     let loader_overrides = LoaderOverrides::without_managed_config_for_tests();
-    let config = Arc::new(
-        ConfigBuilder::default()
-            .codex_home(home.path().to_path_buf())
-            .fallback_cwd(Some(home.path().to_path_buf()))
-            .loader_overrides(loader_overrides.clone())
-            .build()
-            .await?,
-    );
+    let mut config = ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .fallback_cwd(Some(home.path().to_path_buf()))
+        .loader_overrides(loader_overrides.clone())
+        .build()
+        .await?;
+    // Diagnostic storage failure must not disable database-only history listing.
+    let logs_home = home.path().join("unavailable-logs");
+    std::fs::write(&logs_home, "not a directory")?;
+    config.sqlite = config.sqlite.clone().with_local_logs_home(logs_home);
+    let config = Arc::new(config);
     let right_db = codex_state::StateRuntime::init(
         config.sqlite_config().clone(),
         config.model_provider_id.clone(),
@@ -1445,15 +1448,15 @@ async fn thread_list_relation_filters_read_spawn_graph_from_state_db() -> Result
         ),
     ] {
         let created_at = DateTime::parse_from_rfc3339(created_at)?.with_timezone(&Utc);
-        let mut builder = codex_state::ThreadMetadataBuilder::new(
+        let builder = codex_state::ThreadMetadataBuilder::new(
             thread_id,
             codex_home.path().join(format!("{thread_id}.jsonl")),
             created_at,
             source,
-        );
-        builder.model_provider = Some(model_provider.to_string());
-        builder.cwd = codex_home.path().to_path_buf();
-        builder.cli_version = Some("0.0.0".to_string());
+        )
+        .with_model_provider(Some(model_provider.to_string()))
+        .with_cwd(codex_home.path().to_path_buf())
+        .with_cli_version("0.0.0".to_string());
         let mut metadata = builder.build(model_provider);
         metadata.preview = Some("child thread".to_string());
         metadata.first_user_message = metadata.preview.clone();

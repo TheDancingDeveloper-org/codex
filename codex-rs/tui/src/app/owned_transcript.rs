@@ -14,6 +14,7 @@ use crate::bottom_pane::CommandPopupPlacement;
 use crate::bottom_pane::ComposerRenderOptions;
 use crate::custom_terminal::Frame;
 use crate::empty_state_animation::ComposerState;
+#[cfg(test)]
 use crate::history_cell::HistoryRenderMode;
 use crate::keymap::KeymapContext;
 use crate::keymap::bindings_for_action;
@@ -21,7 +22,7 @@ use crate::keymap::configured_binding_for_action;
 use crate::keymap::keymap_action_ids;
 use crate::motion::MotionMode;
 use crate::pager_overlay::TranscriptHistoryState;
-use crate::sidebar_chooser::TabState;
+use crate::sidebar_tab_strip::TabState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::transcript_image::ImagePlacement;
 use crate::transcript_view::TranscriptView;
@@ -34,9 +35,11 @@ use ratatui::widgets::Widget;
 #[derive(Default)]
 pub(super) struct ConversationFrame {
     inset: Option<Rect>,
-    sidebar: Option<sidebar::SidebarLayout>,
+    pub(super) sidebar: Option<sidebar::SidebarLayout>,
     pub(super) chat_strip: Option<Rect>,
+    pub(super) sidebar_input: Option<sidebar::SidebarInputState>,
     pub(super) leader_hud: Option<Rect>,
+    pub(super) close_buttons: [Rect; 2],
     /// A dialog can obscure neighboring content in the terminal's completed buffer.
     behind_dialog: Option<ratatui::buffer::Buffer>,
     caller_images: Vec<ImagePlacement>,
@@ -68,6 +71,17 @@ impl ConversationFrame {
             Some(sidebar::SidebarLayout::Chooser { sidebar, .. }) => Some(sidebar),
             _ => None,
         }
+    }
+
+    pub(super) fn sidebar_tab_strip(&self) -> Option<Rect> {
+        self.chat_strip.or_else(|| {
+            self.chooser_area()
+                .map(|area| side_pane::tab_and_body(area)[0])
+        })
+    }
+
+    pub(super) fn divider_area(&self) -> Option<Rect> {
+        self.sidebar.as_ref()?.divider_area()
     }
 }
 
@@ -204,17 +218,24 @@ impl App {
             self.local_settings.tui.copy_on_select_clear_selection;
         view.set_keymap_bindings(&self.keymap);
         view.set_presentation(view.is_detailed(), chat_widget.history_render_mode());
+        let active = chat_widget.active_activity_cell();
+        let (live_summary, expanded) = view.sync_live_tool_summary(
+            &self.transcript_cells,
+            self.local_settings.tui.collapse_turn_details,
+            active,
+        );
         let active_key = chat_widget.active_cell_transcript_key();
         let detailed = view.is_detailed();
-        let active_ids = chat_widget.active_activity_ids();
-        let expanded = view.sync_live_activity(&self.transcript_cells, active_ids)
-            && chat_widget.history_render_mode() == HistoryRenderMode::Rich;
         let search_changed = view.sync_search_live_tail(transcript_width, active_key, |width| {
             chat_widget.active_cell_transcript_hyperlink_lines(width)
         });
         let changed = if detailed {
             view.sync_live_tail(transcript_width, active_key, |width| {
                 chat_widget.active_cell_transcript_hyperlink_lines(width)
+            })
+        } else if let Some(row) = live_summary {
+            view.sync_live_layout(transcript_width, active_key, |width| {
+                Some(row.layout(width, expanded, chat_widget.active_auxiliary_lines(width)))
             })
         } else {
             view.sync_live_activity_tail(transcript_width, active_key, expanded, |width| {
@@ -237,6 +258,12 @@ impl App {
             self.conversation_frame = ConversationFrame::default();
         }
         let caller_inset = self.conversation_frame.inset;
+        let parent = self.sidebar_parent();
+        if !self.conversation_focus_available(tui)
+            && let Some(pane) = self.sidebars.get_mut(&parent)
+        {
+            pane.close = None;
+        }
         let layout = sidebar::paint_layout(self, tui, screen_size.into());
         let displayed = self.current_displayed_thread_id();
         let chat = match displayed.and_then(|id| self.side_pair_key(id)) {
@@ -264,14 +291,19 @@ impl App {
             self.prepare_conversation(screen_size.into(), caller_inset.or(live), &frames);
         self.conversation_frame.sidebar = layout;
         self.conversation_frame.chat_strip = strip;
+        self.conversation_frame.sidebar_input =
+            self.sidebar().map(sidebar::SidebarPane::input_state);
+        let divider = self.conversation_frame.divider_area();
         if self.divider_drag.is_some_and(|drag| {
-            !drag.matches(screen_size.into(), self.conversation_frame.side_pane())
+            divider.is_none()
+                || !drag.matches(screen_size.into(), self)
                 || !self.conversation_focus_available(tui)
         }) {
             self.divider_drag = None;
         }
         let highlight_divider =
             self.pane_resize.is_some() || tui.link_hover.shape == tui::PointerShape::Resize;
+        let hovered_target = self.hovered_sidebar_target(tui.link_hover.position());
         // An input refresh opens a fresh terminal buffer. Carry the outer owner's
         // completed cells through it when only the conversation is being redrawn.
         let backdrop = caller_inset.map(|_| {
@@ -301,24 +333,36 @@ impl App {
                 }
             }
             painted = self.paint_conversation(frame, &prepared);
-            let divider = match &self.conversation_frame.sidebar {
+            match &self.conversation_frame.sidebar {
                 Some(sidebar::SidebarLayout::Chat(panes)) => {
                     if let Some(companion) = self.side_companions.get_mut(&panes.passive_thread) {
                         companion.view.image_protocol = self.transcript_view.image_protocol;
-                        panes.paint_companion(companion, frame, &frames);
+                        panes.paint_companion(
+                            companion,
+                            frame,
+                            self.local_settings.tui.collapse_turn_details,
+                            &frames,
+                        );
                     }
-                    Some(panes.divider)
                 }
-                Some(sidebar::SidebarLayout::Chooser {
-                    main,
-                    sidebar,
-                    focus,
-                }) => {
+                Some(sidebar::SidebarLayout::Chooser { sidebar, focus, .. }) => {
                     let focused = *focus == PaneFocus::Sidebar;
+                    let resize_hint = self.pane_resize.map(|_| side_pane::RESIZE_HINT);
                     if let Some(creation) = self.sidebar().and_then(|pane| pane.creation.as_ref()) {
                         use sidebar::CreationState;
                         ratatui::widgets::Clear.render(*sidebar, frame.buffer);
-                        let body = sidebar.inner(ratatui::layout::Margin::new(1, 1));
+                        let mut body = sidebar.inner(ratatui::layout::Margin::new(1, 1));
+                        if let Some(hint) = resize_hint {
+                            let footer = Rect::new(
+                                body.x,
+                                body.bottom().saturating_sub(1),
+                                body.width,
+                                body.height.min(1),
+                            );
+                            crate::sidebar_chooser::resize_hint(hint, footer.width)
+                                .render(footer, frame.buffer);
+                            body.height = body.height.saturating_sub(1);
+                        }
                         let text = match &creation.state {
                             CreationState::Waiting { started, .. } => {
                                 let mode = MotionMode::from_animations_enabled(
@@ -328,19 +372,62 @@ impl App {
                                 format!("{glyph} Starting side chat…")
                             }
                             CreationState::Failed { message, .. } => {
-                                format!("{message}\nEnter retry · Esc back")
+                                if resize_hint.is_some() {
+                                    message.clone()
+                                } else {
+                                    crate::sidebar_chooser::creation_failure_text(
+                                        message,
+                                        &self.keymap,
+                                    )
+                                }
                             }
                         };
                         ratatui::widgets::Paragraph::new(text)
                             .wrap(ratatui::widgets::Wrap { trim: false })
                             .render(body, frame.buffer);
-                    } else {
+                    } else if let Some(pane) = self.sidebar() {
+                        let footer = if let Some(hint) = resize_hint {
+                            let row = crate::sidebar_chooser::body_row(*sidebar, sidebar.y);
+                            crate::sidebar_chooser::resize_hint(hint, row.width)
+                        } else {
+                            crate::sidebar_chooser::footer(
+                                &self.keymap,
+                                *sidebar,
+                                pane.choice,
+                                pane.chat_tabs(),
+                                self.chat_widget.side_chat_creation_state(),
+                            )
+                            .0
+                            .line
+                        };
                         crate::sidebar_chooser::paint(
                             focused,
                             *sidebar,
                             frame.buffer,
-                            &self.keymap,
-                            chat,
+                            footer,
+                            pane.chat_tabs(),
+                            pane.choice,
+                            &crate::sidebar_chooser::SidebarStyle {
+                                new_chat: self.chat_widget.side_chat_creation_state(),
+                                use_theme_colors: self.local_settings.tui.status_line_use_colors,
+                                motion: MotionMode::from_animations_enabled(
+                                    self.local_settings.tui.animations,
+                                ),
+                                frames: &frames,
+                            },
+                        );
+                        let chooser = if focused {
+                            TabState::Active
+                        } else {
+                            TabState::Inactive
+                        };
+                        crate::sidebar_chooser::tab_strip(
+                            *sidebar,
+                            chooser,
+                            TabState::Absent,
+                            pane.chat_tabs(),
+                            hovered_target,
+                            frame.buffer,
                         );
                     }
                     frame
@@ -349,15 +436,44 @@ impl App {
                     if focused {
                         frame.cursor_position = None;
                     }
-                    (!main.is_empty()).then_some(main.right())
                 }
-                None => None,
-            };
-            if let Some(strip) = strip {
-                crate::sidebar_chooser::tab_strip(strip, TabState::Absent, chat, frame.buffer);
+                None => {}
             }
-            if let Some(x) = divider {
-                side_pane::paint_divider(frame, x, self.divider_drag, highlight_divider);
+            if let Some(strip) = strip
+                && let Some(pane) = self.sidebar()
+            {
+                crate::sidebar_chooser::tab_strip(
+                    strip,
+                    TabState::Absent,
+                    chat,
+                    pane.chat_tabs(),
+                    hovered_target,
+                    frame.buffer,
+                );
+            }
+            if let Some(divider) = divider {
+                side_pane::paint_divider(frame, divider.x, self.divider_drag, highlight_divider);
+            }
+            self.conversation_frame.close_buttons = Default::default();
+            if let Some(close) = self.sidebar().and_then(|pane| pane.close.as_ref()) {
+                // A resize can collapse an unfocused sidebar while its confirmation is open.
+                let viewport = frame.area();
+                let column = self
+                    .conversation_frame
+                    .chooser_area()
+                    .or(strip)
+                    .unwrap_or(viewport);
+                let area = Rect {
+                    x: column.x,
+                    width: column.width,
+                    ..viewport
+                };
+                let buttons = close.paint(area, frame.buffer);
+                frame
+                    .image_placements
+                    .retain(|image| !area.intersects(image.area));
+                frame.cursor_position = None;
+                self.conversation_frame.close_buttons = buttons;
             }
             self.paint_centered_dialog(frame);
             self.conversation_frame.leader_hud = hud.map(|hud| {
@@ -463,7 +579,7 @@ impl App {
         .then(crate::bottom_pane::ComposerGap::default);
         let prompt_footer = if self.pane_resize.is_some() {
             Some(crate::bottom_pane::TranscriptFooter {
-                text: "Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done".into(),
+                text: side_pane::RESIZE_HINT.into(),
                 cursor_column: None,
                 is_interactive: true,
             })

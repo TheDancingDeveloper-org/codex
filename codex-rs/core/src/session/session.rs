@@ -604,6 +604,24 @@ impl SessionConfiguration {
             Arc::make_mut(&mut next_configuration.original_config_do_not_use)
                 .requested_approvals_reviewer = Some(reviewer);
         }
+        if !next_configuration.trusted_guardian_reviewer
+            && updates.step_settings.approvals_reviewer.is_none()
+            && self.step_settings.collaboration_mode.model()
+                != next_configuration.step_settings.collaboration_mode.model()
+        {
+            let reviewer = crate::config::resolve_guardian_reviewer(
+                next_configuration
+                    .original_config_do_not_use
+                    .requested_approvals_reviewer
+                    .unwrap_or(self.step_settings.approvals_reviewer),
+                Some(next_configuration.step_settings.collaboration_mode.model()),
+                next_configuration
+                    .original_config_do_not_use
+                    .config_layer_stack
+                    .requirements(),
+            )?;
+            Arc::make_mut(&mut next_configuration.step_settings).approvals_reviewer = reviewer;
+        }
         Ok(next_configuration)
     }
 
@@ -1534,9 +1552,8 @@ impl Session {
                 config.model_context_window,
                 config.model_auto_compact_token_limit,
                 config.permissions.approval_policy.value(),
-                config
-                    .permissions
-                    .legacy_sandbox_policy(session_configuration.cwd().as_path()),
+                &config.permissions.effective_permission_profile(),
+                session_configuration.cwd().as_path(),
                 mcp_server_names.iter().map(String::as_str).collect(),
                 &crate::config::legacy_multi_agent_disabled_sources(&config.config_layer_stack),
             );
@@ -1702,11 +1719,6 @@ impl Session {
             } else {
                 None
             };
-            let blocked_request_observer = config
-                .permissions
-                .network
-                .as_ref()
-                .map(|_| build_blocked_request_observer(Arc::clone(&network_approval)));
             let network_policy_decider =
                 network_policy_decider_session
                     .as_ref()
@@ -1729,7 +1741,7 @@ impl Session {
                     config.permissions.permission_profile(),
                     config.effective_local_windows_sandbox_type(),
                     network_policy_decider.as_ref().map(Arc::clone),
-                    blocked_request_observer.as_ref().map(Arc::clone),
+                    Some(build_blocked_request_observer(Arc::clone(&network_approval))),
                     managed_network_requirements_configured,
                     network_proxy_audit_metadata.clone(),
                 )

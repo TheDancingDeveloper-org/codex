@@ -26,6 +26,7 @@ use crate::thread_sample::generate_sample;
 use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_app_server_protocol::ThreadHistoryMode as ApiThreadHistoryMode;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemOutputDeferral;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadItemsListAnchor;
 use codex_app_server_protocol::ThreadItemsListCursor;
@@ -46,6 +47,7 @@ use codex_protocol::SanitizedGitUrl;
 use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::mcp::ClientMcpExtensions;
+use codex_protocol::mcp::plain_output_text;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::LocalHistoryAccount;
 use codex_thread_store::PersistContext;
@@ -1128,16 +1130,8 @@ impl ThreadRequestProcessor {
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
     ) -> Result<(), JSONRPCErrorError> {
-        let mcp_elicitations_auto_deny = xcode_26_4_mcp_elicitations_auto_deny(
-            app_server_client_name.as_deref(),
-            app_server_client_version.as_deref(),
-        );
         thread
-            .set_app_server_client_info(
-                app_server_client_name,
-                app_server_client_version,
-                mcp_elicitations_auto_deny,
-            )
+            .set_app_server_client_info(app_server_client_name, app_server_client_version)
             .await
             .map_err(|err| internal_error(format!("failed to set app server client info: {err}")))
     }
@@ -3676,6 +3670,7 @@ impl ThreadRequestProcessor {
                     sort_direction: StoreSortDirection::Asc,
                     sort_key: StoreItemSortKey::CreatedAtOrdinal,
                     after_updated_at_ordinal: None,
+                    before_updated_at_ordinal: None,
                 })
                 .await
                 .map_err(paginated_history_list_error)?;
@@ -3793,6 +3788,7 @@ impl ThreadRequestProcessor {
                 sort_direction: StoreSortDirection::Desc,
                 sort_key: StoreItemSortKey::CreatedAtOrdinal,
                 after_updated_at_ordinal: None,
+                before_updated_at_ordinal: None,
             })
             .await
             .map_err(paginated_history_list_error)?;
@@ -3811,8 +3807,7 @@ impl ThreadRequestProcessor {
             sort_direction,
             defer_output,
         } = params;
-        let defer_command_output =
-            turn_id.is_some() && defer_output.is_some_and(|options| options.command_execution);
+        let defer_output = defer_output.filter(|_| turn_id.is_some());
         let position = cursor.map(|cursor| match cursor {
             ThreadItemsListCursor::Opaque(cursor) => StoreListItemsPosition::Cursor(cursor),
             ThreadItemsListCursor::Anchor(ThreadItemsListAnchor::Item { item_id }) => {
@@ -3846,6 +3841,7 @@ impl ThreadRequestProcessor {
                 },
                 sort_key: StoreItemSortKey::CreatedAtOrdinal,
                 after_updated_at_ordinal: None,
+                before_updated_at_ordinal: None,
             })
             .await
             .map_err(|err| match err {
@@ -3864,20 +3860,10 @@ impl ThreadRequestProcessor {
         let mut data = Vec::with_capacity(page.items.len());
         for stored_item in page.items {
             let mut entry = stored_thread_item_to_entry(stored_item)?;
-            if defer_command_output
+            if let Some(options) = &defer_output
                 && entry.completed_at_ms.is_some()
-                && let ThreadItemPayload::CommandExecution {
-                    status: codex_app_server_protocol::CommandExecutionStatus::Completed,
-                    exit_code: Some(0),
-                    aggregated_output,
-                    ..
-                } = &mut entry.item.payload
-                && aggregated_output
-                    .as_ref()
-                    .is_some_and(|output| !output.is_empty())
             {
-                *aggregated_output = None;
-                entry.output_deferred = true;
+                entry.output_deferred = defer_item_output(&mut entry.item.payload, options);
             }
             data.push(entry);
         }
@@ -3917,6 +3903,7 @@ impl ThreadRequestProcessor {
                 sort_direction: StoreSortDirection::Asc,
                 sort_key: StoreItemSortKey::CreatedAtOrdinal,
                 after_updated_at_ordinal: None,
+                before_updated_at_ordinal: None,
             })
             .await
             .map_err(|err| match err {
@@ -5795,12 +5782,19 @@ impl ThreadRequestProcessor {
             }
         }
 
-        let ephemeral_preview = if ephemeral {
-            if paginated_source && last_turn_id.is_none() && before_turn_id.is_none() {
-                source_thread.preview.clone()
-            } else {
-                preview_from_rollout_items(&history_items)
-            }
+        let inherited_preview = if paginated_source
+            && last_turn_id.is_none()
+            && before_turn_id.is_none()
+            && !source_thread.preview.is_empty()
+        {
+            source_thread.preview.clone()
+        } else if let Some(preview) = prepared_fork
+            .as_mut()
+            .and_then(|fork| fork.preview_before_compaction.take())
+        {
+            preview
+        } else if paginated_source || ephemeral {
+            preview_from_rollout_items(&history_items)
         } else {
             String::new()
         };
@@ -5820,6 +5814,7 @@ impl ThreadRequestProcessor {
                 self.thread_manager.as_ref(),
                 self.thread_store.as_ref(),
                 StoreThreadMetadataPatch {
+                    preview: (!inherited_preview.is_empty()).then(|| inherited_preview.clone()),
                     project_id: inherited_project_id.clone().map(Some),
                     daybreak_enabled: source_thread.daybreak_enabled,
                     ..Default::default()
@@ -5985,7 +5980,7 @@ impl ThreadRequestProcessor {
                 &config_snapshot,
                 /*path*/ None,
             );
-            thread.preview = ephemeral_preview;
+            thread.preview = inherited_preview;
             thread.forked_from_id = Some(source_thread_id.to_string());
             thread.turns = ephemeral_turns;
             (thread, ephemeral_token_usage_turn_id)
@@ -6266,17 +6261,6 @@ impl ThreadRequestProcessor {
 
         Ok((items, next_cursor))
     }
-}
-
-fn xcode_26_4_mcp_elicitations_auto_deny(
-    client_name: Option<&str>,
-    client_version: Option<&str>,
-) -> bool {
-    // Xcode 26.4 shipped before app-server MCP elicitation requests were
-    // client-visible. Keep elicitations auto-denied for that client line.
-    // TODO: Remove this compatibility hack once Xcode 26.4 ages out.
-    client_name == Some("Xcode")
-        && client_version.is_some_and(|version| version.starts_with("26.4"))
 }
 
 const THREAD_TURNS_DEFAULT_LIMIT: usize = 25;
@@ -6567,6 +6551,57 @@ fn stored_thread_item_to_api_item(
         started_at_ms: stored_item.started_at_ms,
         completed_at_ms: stored_item.completed_at_ms,
     })
+}
+
+fn defer_item_output(item: &mut ThreadItemPayload, options: &ThreadItemOutputDeferral) -> bool {
+    match item {
+        ThreadItemPayload::CommandExecution {
+            status: codex_app_server_protocol::CommandExecutionStatus::Completed,
+            exit_code: Some(0),
+            aggregated_output,
+            ..
+        } if options.command_execution
+            && aggregated_output
+                .as_ref()
+                .is_some_and(|output| !output.is_empty()) =>
+        {
+            *aggregated_output = None;
+        }
+        ThreadItemPayload::McpToolCall {
+            server,
+            status: codex_app_server_protocol::McpToolCallStatus::Completed,
+            result: Some(result),
+            error: None,
+            app_context,
+            mcp_app_resource_uri: None,
+            mcp_app_ui: None,
+            ..
+        } if options.mcp_tool_call
+            && server != "codex_app"
+            && app_context
+                .as_ref()
+                .is_none_or(|ctx| ctx.resource_uri.is_none())
+            && is_deferrable_mcp_result(result) =>
+        {
+            result.content.clear();
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn is_deferrable_mcp_result(result: &codex_app_server_protocol::McpToolCallResult) -> bool {
+    if result.structured_content.is_some() || result.meta.is_some() {
+        return false;
+    }
+    let mut has_text = false;
+    for block in &result.content {
+        let Some(text) = plain_output_text(block) else {
+            return false;
+        };
+        has_text |= !text.is_empty();
+    }
+    has_text
 }
 
 fn stored_thread_item_to_entry(
@@ -6966,12 +7001,15 @@ fn preview_from_rollout_items(items: &[RolloutItem]) -> String {
         .iter()
         .find_map(|item| match item {
             RolloutItem::ResponseItem(item) => match codex_core::parse_turn_item(&item.item) {
-                Some(codex_protocol::items::TurnItem::UserMessage(user)) => Some(user.message()),
+                Some(codex_protocol::items::TurnItem::UserMessage(user)) => {
+                    codex_protocol::protocol::user_message_preview(
+                        &user.as_legacy_user_message_event(),
+                    )
+                }
                 _ => None,
             },
             _ => None,
         })
-        .map(|preview| strip_user_message_prefix(preview.as_str()).to_string())
         .unwrap_or_default()
 }
 

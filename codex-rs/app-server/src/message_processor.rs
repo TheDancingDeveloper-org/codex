@@ -559,7 +559,7 @@ impl MessageProcessor {
             Arc::clone(&thread_list_state_permit),
         );
         let thread_processor = ThreadRequestProcessor::new(
-            auth_manager.clone(),
+            auth_manager,
             Arc::clone(&thread_manager),
             outgoing.clone(),
             arg0_paths.clone(),
@@ -579,7 +579,6 @@ impl MessageProcessor {
             sample_responses,
         );
         let turn_processor = TurnRequestProcessor::new(
-            auth_manager,
             Arc::clone(&thread_manager),
             outgoing.clone(),
             analytics_events_client.clone(),
@@ -1890,12 +1889,13 @@ impl MessageProcessor {
                     .bedrock_check_gov_cloud_requirements()
                     .await
             }
-            ClientRequest::GatewayOAuthRead { .. } => {
-                Box::pin(self.account_processor.gateway_oauth_read())
-                    .await
-                    .map(|response| Some(response.into()))
-            }
-            ClientRequest::GatewayOAuthLogin { .. } => {
+            ClientRequest::GatewayOAuthRead { params, .. } => Box::pin(
+                self.account_processor
+                    .gateway_oauth_read(params.unwrap_or_default()),
+            )
+            .await
+            .map(|response| Some(response.into())),
+            ClientRequest::GatewayOAuthLogin { params, .. } => {
                 if session
                     .opted_out_notification_methods()
                     .contains("account/gatewayOAuth/changed")
@@ -1904,10 +1904,11 @@ impl MessageProcessor {
                         "Gateway login requires account/gatewayOAuth/changed notifications",
                     ))
                 } else {
-                    Box::pin(
-                        self.account_processor
-                            .gateway_oauth_login(connection_id, &session.rpc_gate),
-                    )
+                    Box::pin(self.account_processor.gateway_oauth_login(
+                        params.unwrap_or_default(),
+                        connection_id,
+                        &session.rpc_gate,
+                    ))
                     .await
                     .map(|response| Some(response.into()))
                 }
@@ -1941,6 +1942,12 @@ impl MessageProcessor {
             ClientRequest::GetAuthStatus { params, .. } => {
                 self.account_processor.get_auth_status(params).await
             }
+            ClientRequest::GetAccountSecuritySetup { .. } => Ok(Some(
+                self.account_processor
+                    .get_account_security_setup()
+                    .await
+                    .into(),
+            )),
             ClientRequest::GetAccountRateLimits { params, .. } => {
                 self.account_processor.get_account_rate_limits(params).await
             }

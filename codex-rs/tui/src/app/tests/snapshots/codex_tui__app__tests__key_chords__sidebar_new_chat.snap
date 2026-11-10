@@ -7,10 +7,10 @@ expression: frame
                                                                                │ Open in sidebar
                                                                                │
                                                                                │ › + New side chat
-                                                                               │     Start from this conversation
+                                                                               │     Start from the main chat
                                                                                │
                                                                                │
 › parent draft                                                                 │
                                                                                │
   gpt-test default                                                             │
-                                                                               │ Enter open · Esc back · ↑/↓ move …
+                                                                               │ f5 g open · esc back · ↑/↓ move …

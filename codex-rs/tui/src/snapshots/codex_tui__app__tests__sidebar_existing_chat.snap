@@ -1,14 +1,17 @@
 ---
 source: tui/src/app/tests.rs
-assertion_line: 3584
 expression: "chooser.lines().filter_map(|line|\nline.split_once('│').map(|(_, sidebar)|\nsidebar.trim_end())).collect::<Vec<_>>().join(\"\\n\")"
 ---
- Side chat                       +
+ Side chat×                      +
 
  Open in sidebar
 
- ›   Side chat
-     Return to this conversation
+   + New side chat
+     Start from the main chat
+
+ Side chats  1
+
+ › ○ Side chat
 
 
 
@@ -16,8 +19,4 @@ expression: "chooser.lines().filter_map(|line|\nline.split_once('│').map(|(_, 
 
 
 
-
-
-
-
- Enter open · Esc back …
+ enter open · esc back …
