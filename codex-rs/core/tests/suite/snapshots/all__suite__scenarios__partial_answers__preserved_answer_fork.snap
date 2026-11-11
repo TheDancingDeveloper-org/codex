@@ -6,12 +6,12 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=855bf977570202a9):
+00:additional_tools/developer (2; hash=0fc83b839631b79d):
         - namespace/functions; hash=2e61665749f6eed1
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=2c8d6295978dbe63
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=48f7a334813023a7
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -46,12 +46,12 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
 
 ## Window 2 (after request 3: input diverged at item 12)
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=855bf977570202a9):
+00:additional_tools/developer (2; hash=0fc83b839631b79d):
         - namespace/functions; hash=2e61665749f6eed1
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=2c8d6295978dbe63
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=48f7a334813023a7
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
