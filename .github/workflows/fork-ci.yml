@@ -235,9 +235,12 @@ jobs:
       # and it requires gstreamer-1.0 >= 1.28. Ubuntu 24.04 ships 1.24, so no
       # apt package satisfies it. Upstream never builds it with cargo either; it
       # builds //codex-rs/voice-host with Bazel against a bundled GStreamer.
+      # Two jobs for the same reason as clippy below (WI-3954): at full width
+      # rustc on codex-core's `all` test target was OOMKilled at the
+      # nodef-gha-public-docker runner's 10 GiB limit (fork-ci run 43003880297).
       - name: cargo check
         if: steps.crates.outputs.rust == 'true'
-        run: cargo check --workspace --all-targets --exclude codex-voice-host
+        run: cargo check --workspace --all-targets --exclude codex-voice-host --jobs 2
 
       - name: cargo fmt
         if: steps.crates.outputs.rust == 'true'
