@@ -175,8 +175,14 @@ pub enum HookHandlerConfig {
         /// It also has no effect on a hook that never runs, such as an untrusted
         /// user or project hook, or when the hooks feature is disabled. An async
         /// handler that sets it runs synchronously, because a block can only be
-        /// applied before the tool starts.
-        #[serde(default, rename = "failClosed")]
+        /// applied before the tool starts. Omitted when false so the hook
+        /// identity hash of a handler that does not set it matches the hash
+        /// upstream computes, keeping existing trust approvals valid.
+        #[serde(
+            default,
+            rename = "failClosed",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
         fail_closed: bool,
     },
     #[serde(rename = "mcp_tool")]
