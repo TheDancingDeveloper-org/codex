@@ -302,3 +302,21 @@ test(tests::test_apply_patch_fails_on_write_error) # fails on unmodified fork/ma
 test(tests::test_failed_move_returns_committed_destination_delta) # fails on unmodified fork/main, fork-ci run 42897578509
 test(v2_rpc_refreshes_metadata_and_enforces_sandbox) # bwrap userns refused on node-b-gha-public-publish, fork-ci run 42969780589
 test(writable_open_obeys_sandbox_write_permissions) # fails on unmodified fork/main, fork-ci run 42897578509
+# quarantined until ci-k8s-0 runs non-root with a user namespace (see note); reverse then
+test(suite::unified_exec_stdin_approval::stdin_reviews_current_grants_with_sandbox_prompts_disabled::) # root runner: no approval prompt; 43007148311
+test(suite::network_approval::guardian_network_approval_preserves_action_and_outcome_routing::) # root runner: no approval prompt; 43007148311
+test(suite::skills_extension::repository_skill_cache_cannot_read_inaccessible_files::) # root runner: chmod 000 still readable; 43007148311
+test(suite::guardian_review::guardian_refreshes_missing_default_reviewer_once::failed_cache_write_keeps_recovered_reviewer) # root runner: read-only file still writable; 43007148311
+test(suite::guardian_cached_score::serving_assessment_replaces_async_scoring::code_cell_low) # root runner: nested command not blocked; 43007148311
+test(suite::guardian_cached_score::serving_assessment_replaces_async_scoring::code_cell_review) # root runner: nested command not blocked; 43007148311
+test(suite::guardian_cached_score::serving_assessment_replaces_async_scoring::interrupted_cell_review) # root runner: nested command not blocked; 43007148311
+test(suite::guardian_cached_score::serving_assessment_replaces_async_scoring::nested_hook_rewrite) # root runner: rewritten command not blocked; 43007148311
+test(suite::exec_policy::granular_dangerous_command_approval_preserves_permissions::approved_with_write_access) # root runner: write succeeded where denial expected; 43007148311
+test(suite::code_mode::code_mode_background_keeps_running_on_later_turn_without_wait) # root runner: background output differs; 43007148311
+test(suite::abort_tasks::interrupt_long_running_tool_emits_turn_aborted) # pre-existing on unmodified fork/main 42897578509; 43007148311
+test(suite::interrupt_hooks::async_interrupt_hook_runs_without_delaying_turn_aborted) # pre-existing on unmodified fork/main 42897578509; 43007148311
+test(suite::interrupt_hooks::interrupt_hook_runs_before_turn_aborted_and_records_payload) # pre-existing on unmodified fork/main 42897578509; 43007148311
+test(suite::interrupt_hooks::timed_out_interrupt_hook_fails_before_turn_aborted) # pre-existing on unmodified fork/main 42897578509; 43007148311
+test(suite::copy_file_uses_each_environments_permissions::) # runner permission model; also 42969780589
+test(suite::transfers::copy_hooks_follow_source_and_target::rewrite_paths_within_the_selected_environments) # runner permission model; also 42969780589
+test(tests::reads_typed_array_contents_with_the_compiled_binding_size) # identical failure on 42969780589
