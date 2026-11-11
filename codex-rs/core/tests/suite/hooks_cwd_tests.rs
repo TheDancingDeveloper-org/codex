@@ -135,7 +135,11 @@ async fn pre_tool_use_cwd_matches_execution(
                 expected_cwd.inferred_native_path_string()
             },
             "process_cwd": dunce::canonicalize(&hook_cwd)?.to_string_lossy(),
-            "tool_input": { "command": "cat cwd-marker.txt" },
+            // Fork: exec_command's PreToolUse input carries the resolved workdir.
+            "tool_input": {
+                "command": "cat cwd-marker.txt",
+                "workdir": expected_cwd.inferred_native_path_string(),
+            },
         })],
     );
     let requests = responses.requests();
@@ -497,6 +501,18 @@ elif event == 'PreToolUse' and {mode:?} == 'rewrite':
             continue;
         }
         if mode == "stdin" && event == "PostToolUse" {
+            // Fork: non-empty write_stdin text is reviewed as a Bash PreToolUse
+            // before it reaches the process; `workdir` is the process start dir.
+            expected.push(json!({
+                "event": "PreToolUse", "tool_name": "Bash",
+                "cwd": if test.executor_environment().environment().is_remote() {
+                    post_process_cwd.clone()
+                } else {
+                    other.inferred_native_path_string()
+                },
+                "process_cwd": post_process_cwd,
+                "tool_input": {"command": "go\n", "workdir": expected_cwd},
+            }));
             expected.push(json!({
                 "event": "PermissionRequest", "tool_name": "write_stdin",
                 "cwd": expected_hook_cwd, "process_cwd": post_process_cwd,
@@ -511,7 +527,12 @@ elif event == 'PreToolUse' and {mode:?} == 'rewrite':
         expected.push(json!({
             "event": event, "tool_name": "Bash", "cwd": expected_hook_cwd,
             "process_cwd": if event == "PostToolUse" { post_process_cwd.clone() } else { dunce::canonicalize(&hook_cwd)?.to_string_lossy().into_owned() },
-            "tool_input": {"command": event_command},
+            "tool_input": if event == "PreToolUse" {
+                // Fork: exec_command's PreToolUse input carries the resolved workdir.
+                json!({"command": event_command, "workdir": expected_cwd.inferred_native_path_string()})
+            } else {
+                json!({"command": event_command})
+            },
         }));
     }
     assert_eq!(

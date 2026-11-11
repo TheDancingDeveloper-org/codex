@@ -342,7 +342,13 @@ impl CoreToolRuntime for ExecCommandHandler {
             .ok()
             .map(|args| PreToolUsePayload {
                 tool_name: HookToolName::bash(),
-                tool_input: serde_json::json!({ "command": args.cmd }),
+                tool_input: serde_json::json!({
+                    "command": args.cmd,
+                    // The resolved directory the command actually runs in. The hook
+                    // payload's `cwd` is the turn's cwd, which differs whenever the
+                    // tool call sets `workdir`.
+                    "workdir": resolved_hook_workdir(invocation, arguments),
+                }),
             })
     }
 
@@ -392,6 +398,36 @@ impl CoreToolRuntime for ExecCommandHandler {
     ) -> Option<PostToolUsePayload> {
         post_unified_exec_tool_use_payload(invocation, result)
     }
+}
+
+/// Absolute path the command will run in: `workdir` resolved against the
+/// selected environment's cwd, or that cwd itself when `workdir` is absent.
+/// Falls back to the turn's local environment cwd when resolution fails.
+fn resolved_hook_workdir(invocation: &ToolInvocation, arguments: &str) -> String {
+    let fallback = || {
+        invocation
+            .step_context
+            .environments
+            .local_environment_cwd()
+            .map(|cwd| cwd.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let Ok(args) = parse_arguments::<ExecCommandWorkdirArgs>(arguments) else {
+        return fallback();
+    };
+    let Ok(environment) = selected_executor(
+        &invocation.environments,
+        &invocation.step_context.environments,
+    ) else {
+        return fallback();
+    };
+    args.resolve_cwd(environment)
+        .and_then(|cwd| {
+            cwd.to_abs_path()
+                .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))
+        })
+        .map(|cwd| cwd.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| fallback())
 }
 
 fn emit_unified_exec_tty_metric(session_telemetry: &SessionTelemetry, tty: bool) {
