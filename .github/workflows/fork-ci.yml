@@ -335,7 +335,14 @@ jobs:
           # misses. Upstream's Bazel build declares them as data deps. Build
           # every workspace bin once first. codex-voice-host is excluded
           # because it needs GStreamer >= 1.28, which Ubuntu 24.04 lacks.
-          cargo build --workspace --bins --exclude codex-voice-host
+          # Two rustc at a time, like check and clippy: on a cold kache this
+          # step compiled the whole workspace at full width, reached ~20 GiB in
+          # node-f's 24 GiB runner cgroup and the OOM killer took a compile
+          # process. fork-ci run 43136846045 (merge_group for PR #37) showed it
+          # only as a silent `kache ... (exit status: 1)` on codex-core's test
+          # target; the same tree and runner passed with a warm cache in run
+          # 43127706154.
+          cargo build --workspace --bins --exclude codex-voice-host --jobs 2
           # nextest UNIONS multiple -E filtersets, so one `not` per line would
           # re-include every excluded test as soon as the file has two lines.
           # Build a single disjunction and omit -E entirely when nothing is
@@ -364,8 +371,9 @@ jobs:
             for crate in "${crates[@]}"; do args+=(-p "$crate"); done
             # One invocation: per-crate loops re-resolved features and rebuilt
             # shared dependencies once per crate. --timings records the
-            # critical path next to clippy's.
-            cargo nextest run "${args[@]}" --no-fail-fast --timings "${filter[@]}" || status=1
+            # critical path next to clippy's. --build-jobs caps the test-build
+            # compiles for the same memory reason as the bins build above.
+            cargo nextest run "${args[@]}" --no-fail-fast --build-jobs 2 --timings "${filter[@]}" || status=1
             [[ -f cargo-timing.html ]] && cp cargo-timing.html /tmp/cargo-timings/nextest-timing.html
           fi
           exit "$status"
