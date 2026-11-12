@@ -55,9 +55,11 @@ class SelectTest(unittest.TestCase):
             ["codex-protocol", "codex-core", "codex-cli"],
         )
 
-    def test_member_manifest_selects_reverse_dependencies(self):
+    def test_member_manifest_selects_only_its_package(self):
+        # A fork-owned manifest hunk is a dependency the fork added; dependents
+        # compile against the same API, so they are not selected (WI-4161).
         selected = self.select(["codex-rs/protocol/Cargo.toml"])
-        self.assertEqual(selected, ["codex-protocol", "codex-core", "codex-cli"])
+        self.assertEqual(selected, ["codex-protocol"])
 
     def test_member_manifest_without_dependents_selects_itself(self):
         self.assertEqual(self.select(["codex-rs/cli/Cargo.toml"]), ["codex-cli"])

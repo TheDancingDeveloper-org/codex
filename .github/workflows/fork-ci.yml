@@ -33,7 +33,9 @@ jobs:
   # The work runs as parallel jobs under other names, and that job reports
   # their combined result, so the required context never changes. Splitting
   # took the merge_group run from 95-105 minutes (one serial job, past the
-  # queue's 90-minute timeout) to the length of its longest half (WI-4161).
+  # queue's 90-minute timeout) to the length of its longest half, and the
+  # selection in `plan` keeps every half to the packages the fork owns
+  # (WI-4161).
   plan:
     name: plan
     # Trusted runs (same-repo PRs, workflow_dispatch) use the GCP Spot runner
@@ -48,7 +50,7 @@ jobs:
     outputs:
       rust: ${{ steps.crates.outputs.rust }}
       list: ${{ steps.crates.outputs.list }}
-      all: ${{ steps.crates.outputs.all }}
+      base: ${{ steps.crates.outputs.base }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
         with:
@@ -72,129 +74,19 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # Directory names are not package names (app-server-protocol is the
-      # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
-      # so each changed file maps to the package whose manifest directory is
-      # the longest prefix of its path. A workspace manifest change rebuilds
-      # every package.
-      - name: Packages changed against fork/main
+      # The fork trusts upstream's CI for upstream's code and tests only what
+      # the fork owns: the diff against the merge-base with upstream main, the
+      # carried patches plus the fork-only files. Diffed against fork/main, an
+      # upstream sync is a change to every package, and a run over hundreds of
+      # upstream crates took 95-105 minutes (WI-4161). The same base serves PRs
+      # and the queue. See fork-ci-select.sh and docs/ci.md, "What the fork
+      # tests".
+      - name: Packages the fork owns
         id: crates
         env:
           FORCED_PACKAGES: ${{ inputs.packages }}
-          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
         shell: bash
-        run: |
-          set -euo pipefail
-          # In the queue, diff the whole group against the queue's base: every
-          # PR ahead of this one in the group is part of the tree under test.
-          if [[ -n "$QUEUE_BASE" ]]; then
-            base="$QUEUE_BASE"
-          else
-            base="$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)"
-          fi
-          mapfile -t files < <(git diff --name-only "$base"...HEAD)
-          # Path scope: a diff with nothing under codex-rs/ or .github/ (docs,
-          # FORK.md, sdk/) skips the Rust steps. The job still reports, so a
-          # required check is satisfied.
-          rust=false
-          for f in "${files[@]}"; do
-            case "$f" in codex-rs/*|.github/*) rust=true ;; esac
-          done
-          [[ -n "$FORCED_PACKAGES" ]] && rust=true
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
-          if [[ -n "$FORCED_PACKAGES" ]]; then
-            mapfile -t packages < <(echo "$FORCED_PACKAGES" | tr ',' '\n')
-            echo "forced: ${packages[*]}"
-            {
-              echo "list<<EOF"
-              printf '%s\n' "${packages[@]}"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          all=false
-          lock_only=false
-          for f in "${files[@]}"; do
-            case "$f" in
-              codex-rs/Cargo.toml) all=true ;;
-              codex-rs/Cargo.lock) lock_only=true ;;
-            esac
-          done
-          # A workspace manifest change rebuilds every package. A Cargo.lock
-          # change does not: only members whose resolved dependency set
-          # actually moved are selected, by diffing `cargo metadata` (the full
-          # resolve, not --no-deps) on the base against HEAD. Any other path
-          # still selects its owning package, and a member manifest also
-          # selects its workspace reverse-dependencies.
-          others=()
-          for f in "${files[@]}"; do
-            [[ "$f" == "codex-rs/Cargo.lock" ]] && continue
-            others+=("$f")
-          done
-          if $all; then
-            mapfile -t packages < <(cargo metadata --no-deps --format-version 1 \
-              | jq -r '.packages[].name' | sort -u)
-          else
-            mapfile -t packages < <(cargo metadata --no-deps --format-version 1 \
-              | python3 "${GITHUB_WORKSPACE}/.github/scripts/fork-changed-packages.py" "${others[@]}")
-            if $lock_only; then
-              base_meta="$(mktemp)"
-              head_meta="$(mktemp)"
-              cargo metadata --format-version 1 --locked > "$head_meta"
-              # metadata reads the lock next to the workspace manifest. Swap the
-              # base lock in, read it, and put HEAD's lock back. The manifest
-              # stays HEAD's: a manifest change is not lock-only.
-              cp Cargo.lock /tmp/Cargo.lock.head
-              # A failed metadata read must not leave the base lock checked out:
-              # every later cargo invocation would compile against it.
-              trap 'mv /tmp/Cargo.lock.head Cargo.lock' EXIT
-              git show "$base:codex-rs/Cargo.lock" > Cargo.lock
-              # Not --locked. The base lock describes the base manifests, and
-              # reading it against HEAD's manifests (a new edge on an existing
-              # package) makes cargo 1.95 call the lock stale even though the
-              # resolve is identical. --offline keeps it from moving a version;
-              # the copy above is discarded either way.
-              cargo metadata --format-version 1 --offline > "$base_meta"
-              mv /tmp/Cargo.lock.head Cargo.lock
-              trap - EXIT
-              mapfile -t locked < <(python3 "${GITHUB_WORKSPACE}/.github/scripts/fork-lock-affected.py" "$base_meta" "$head_meta")
-              if (( ${#locked[@]} == 0 )); then
-                # A lock that "affects nothing" is a bug in the diff far more
-                # often than a fact, and skipping every check would fail open.
-                echo "::warning::Cargo.lock changed but the resolve diff selected nothing; selecting every member"
-                mapfile -t locked < <(jq -r --argjson members "$(jq -c '.workspace_members' "$head_meta")" \
-                  '.packages[] | select(.id as $id | $members | index($id)) | .name' "$head_meta" | sort -u)
-              fi
-              packages+=("${locked[@]}")
-            fi
-          fi
-          # Unique, stable order.
-          mapfile -t packages < <(printf '%s\n' "${packages[@]}" | awk 'NF && !seen[$0]++')
-          # codex-voice-host is the only package that pulls in GStreamer, and it
-          # needs gstreamer-1.0 >= 1.28 while Ubuntu 24.04 ships 1.24, so no apt
-          # package satisfies it. Every other Rust step excludes it; drop it here
-          # as well, or nextest builds it through its -p list and the whole job
-          # fails on glib-2.0.pc.
-          mapfile -t packages < <(printf '%s\n' "${packages[@]}" | awk '$0 != "codex-voice-host"')
-          echo "changed: ${packages[*]:-none}"
-          # Whether the selection is every workspace member clippy can build.
-          # Then clippy --all-targets compiles exactly what `cargo check
-          # --workspace --all-targets` would, and lint skips the separate check.
-          mapfile -t members < <(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[].name' | awk '$0 != "codex-voice-host"' | sort -u)
-          if [[ "$(printf '%s\n' "${members[@]}" | sort -u)" == "$(printf '%s\n' "${packages[@]:-}" | sed '/^$/d' | sort -u)" ]]; then
-            echo "all=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "all=false" >> "$GITHUB_OUTPUT"
-          fi
-          {
-            echo "list<<EOF"
-            printf '%s\n' "${packages[@]:-}"
-            echo "EOF"
-            echo "files<<EOF"
-            printf '%s\n' "${files[@]:-}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/fork-ci-select.sh"
 
   lint:
     name: fmt, clippy
@@ -273,16 +165,11 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
 
-      # codex-voice-host is excluded: it is the only package pulling in GStreamer,
-      # and it requires gstreamer-1.0 >= 1.28. Ubuntu 24.04 ships 1.24, so no
-      # apt package satisfies it. Upstream never builds it with cargo either; it
-      # builds //codex-rs/voice-host with Bazel against a bundled GStreamer.
-      # Skipped when the selection is every member: clippy below then compiles
-      # the same targets, and fails on every rustc error itself.
-      - name: cargo check
-        if: needs.plan.outputs.all != 'true'
-        shell: bash
-        run: cargo check --workspace --all-targets --exclude codex-voice-host --jobs "$("${GITHUB_WORKSPACE}/.github/scripts/fork-ci-build-jobs.sh")"
+      # No whole-workspace `cargo check`: upstream's crates are upstream's to
+      # compile and test. clippy below compiles the selected packages with
+      # --all-targets and fails on any rustc error (WI-4161). codex-voice-host
+      # is never selected: it needs GStreamer >= 1.28 and Ubuntu 24.04 ships
+      # 1.24.
 
       - name: cargo fmt
         shell: bash
@@ -296,17 +183,17 @@ jobs:
 
       # -D warnings would fail the PR on upstream lint debt in lines it never
       # touched, and a fork patch must not have to fix that. Clippy runs without
-      # it, and only a warning or error whose primary span overlaps a hunk this
-      # PR changed fails the build. Compile errors are fatal regardless: this
-      # step fails on any rustc error, and `cargo check` above also runs when
-      # the selection is not the whole workspace.
+      # it, and only a warning or error whose primary span overlaps a hunk the
+      # fork owns (the diff against the upstream merge-base, carried patches
+      # included) fails the build. Compile errors are fatal regardless: this
+      # step fails on any rustc error.
       - name: cargo clippy
         shell: bash
         env:
-          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          BASE: ${{ needs.plan.outputs.base }}
         run: |
           set -euo pipefail
-          base="${QUEUE_BASE:-$(git merge-base HEAD origin/fork/main 2>/dev/null || git merge-base HEAD fork/main)}"
+          base="$BASE"
           # One changed line range per hunk, as "file start count" with the
           # codex-rs/ prefix stripped. A count of 0 is a pure deletion.
           git diff -U0 "$base"...HEAD -- codex-rs \
@@ -331,9 +218,8 @@ jobs:
           cargo clippy "${args[@]}" --all-targets --jobs "$jobs" --timings --message-format=json -- -W clippy::all \
             > /tmp/clippy.json || clippy_status=$?
           [[ -f cargo-timing.html ]] && cp cargo-timing.html /tmp/cargo-timings/clippy-timing.html
-          # Compile errors are fatal anywhere, as `cargo check` makes them (it is
-          # skipped when this run covers every member). Only clippy's own lints
-          # are gated by changed hunk.
+          # Compile errors are fatal anywhere. Only clippy's own lints are gated
+          # by changed hunk.
           rustc_errors="$(jq -r '
             select(.reason == "compiler-message")
             | .message

@@ -110,5 +110,7 @@ sync runbook.
 
 `fork-ci` supports a merge queue (`merge_group`), skips its Rust steps when a
 PR touches nothing under `codex-rs/` or `.github/`, and cancels superseded runs
-per ref. How it runs on PRs, in the queue, and around upstream syncs:
-`docs/ci.md`.
+per ref. It tests only what the fork owns: the diff against the merge-base
+with upstream `main`, so an upstream sync tests the carried patches on their
+new base and trusts upstream's CI for the rest. How it runs on PRs, in the
+queue, and around upstream syncs: `docs/ci.md`.

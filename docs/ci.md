@@ -9,22 +9,55 @@ Fork-only. Upstream's CI is disabled on this fork (see `FORK.md`,
 
 | Event | `fork-ci` |
 |---|---|
-| `pull_request` into `fork/main` | Rust steps only when the diff touches `codex-rs/` or `.github/`; fmt/clippy/nextest only for the packages the diff changes |
-| `merge_group` (the queue) | Rust steps for the packages the **whole queued group** changes, diffed against the queue's base (`merge_group.base_sha`), plus `cargo check --workspace` |
-| `workflow_dispatch` | the packages named in `packages`, or the diff |
+| `pull_request` into `fork/main` | Rust steps only when the fork-owned delta touches `codex-rs/` or `.github/`; fmt/clippy/nextest only for the packages the fork owns |
+| `merge_group` (the queue) | the same selection: every PR in a queue group is fork-owned, so the group's delta is inside the fork-owned delta |
+| `workflow_dispatch` | the packages named in `packages`, or the selection |
 
 A pull request that touches only docs, `FORK.md` or `sdk/` still reports
 `fmt, clippy, test` as passed, with the Rust steps skipped, so a required
 check never waits on it.
 
-### Why the queue is package-scoped too
+### What the fork tests
 
-Vogt's queue runs everything. Here, "everything" is a workspace-wide nextest
-over hundreds of upstream crates, at roughly an hour on the 30-vCPU runner, and
-upstream lint and test debt makes a full run fail regardless of the PR. The
-queue keeps the package selection but widens the diff to the whole group, and
-`cargo check --workspace --all-targets` still compiles every crate, so a
-cross-crate API break fails the queue.
+The fork trusts upstream's CI for upstream's code. Every commit on upstream
+`main` has passed upstream's own checks, and the fork never edits those files.
+What nobody else tests is the fork's own delta: the carried patch series and
+the fork-only files, as they sit on the upstream commit the tree merged or
+rebased onto. So `fork-ci` diffs HEAD against its merge-base with upstream
+`main` (fetched from `openai/codex` in the `plan` job; the fork's `main`
+mirror can lag) and selects the packages that own those files
+(`.github/scripts/fork-ci-select.sh`, `fork-changed-packages.py`). The same
+base feeds clippy's hunk gate, so fork-owned lines lint clean and upstream
+lint debt never fails a run.
+
+Why not diff against `fork/main`: an upstream sync then looks like a change
+to every package (PR #37 touched 4,673 files), and a workspace-wide nextest
+over hundreds of upstream crates took 95-105 minutes, past the merge queue's
+90-minute `check_response_timeout`, so the queue dropped the entry (WI-4161).
+
+What the selection ignores on purpose:
+
+- The fork's version restamp. `Cargo.toml` and `Cargo.lock` carry the release
+  version where upstream has `0.0.0`; the workflow resets the manifest before
+  selecting, the workspace manifest counts only when it differs beyond its
+  version line, and the lock is compared by resolve with both sides at
+  `0.0.0`.
+- A member `Cargo.toml` selects its own package only. A fork-owned manifest
+  hunk is a dependency a patch added, and dependents compile against the same
+  API; a patch that changes an API changes `.rs` files, and dependents the
+  fork edits are selected by those edits.
+- There is no whole-workspace `cargo check` any more. clippy compiles the
+  selected packages with `--all-targets` and fails on any rustc error.
+
+What this gives up: a regression upstream introduces in a crate the fork does
+not touch ships in a fork release untested here. Upstream's CI is the check
+for that. A behaviour change upstream that a carried patch depends on is
+caught only if the patch's own tests exercise it; the patched crates'
+tests always run.
+
+The two heavy halves (`test`, `test (app-server integration)`) and the
+`fmt, clippy` job run in parallel and report through one aggregator job
+that keeps the required context name; see `fork-ci.yml`.
 
 ### Concurrency
 
@@ -49,7 +82,10 @@ the entry's `merge_group` run. Don't rebase a queued PR by hand.
 
 A rebase of `fork/main` onto a new upstream tag is a force-push
 (`docs/fork-upstream-sync.md`), not a queued merge. Drain or pause the queue
-before you push the rebase. The ruleset below bypasses only the repository
+before you push the rebase. A sync that merges `upstream/main` instead (PR
+#37) goes through the queue like any PR, and because the selection diffs
+against the upstream merge-base, it tests the carried patches on the new
+base and nothing else. The ruleset below bypasses only the repository
 admin role, which is what lets the `--force-with-lease` push through.
 
 ## Turning the queue on (operator)
