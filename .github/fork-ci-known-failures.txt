@@ -320,3 +320,10 @@ test(suite::interrupt_hooks::timed_out_interrupt_hook_fails_before_turn_aborted)
 test(suite::copy_file_uses_each_environments_permissions::) # runner permission model; also 42969780589
 test(suite::transfers::copy_hooks_follow_source_and_target::rewrite_paths_within_the_selected_environments) # runner permission model; also 42969780589
 test(tests::reads_typed_array_contents_with_the_compiled_binding_size) # identical failure on 42969780589
+# nodef-gha-public-rust is root without a usable user namespace; bwrap refuses to start the
+# sandboxed command, so it exits 1 and creates no file. They pass on ci-k8s-0 (run
+# 43007148311, same code) and ci-k8s-2 (run 42897578509, unmodified fork/main), and
+# reproduce on any host that refuses `unshare -Ur`. Reverse these when node-f runs
+# non-root with a usable user namespace.
+test(suite::approvals::approving_execpolicy_amendment_persists_policy_and_skips_future_prompts) # bwrap userns refused on nodef-gha-public-rust, fork-ci run 43114813312
+test(suite::approvals::spawned_subagent_execpolicy_amendment_propagates_to_parent_session) # bwrap userns refused on nodef-gha-public-rust, fork-ci run 43114813312
