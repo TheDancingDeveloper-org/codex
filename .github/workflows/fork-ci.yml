@@ -35,7 +35,8 @@ jobs:
     # (30 vCPU, persistent sccache; started on demand by the Node B poller).
     # Fork PRs stay on GitHub-hosted runners: a persistent self-hosted runner
     # must never execute untrusted fork code.
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy"]') }}
+    # Temporarily pinned to node-f (WI-4100): ci-k8s-1's 98 GB scratch volume is too small for a Codex workspace build (ENOSPC). Remove the node-f label once the k8s runners have enough scratch.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","node-f"]') }}
     # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:
