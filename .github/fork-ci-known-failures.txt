@@ -327,3 +327,10 @@ test(tests::reads_typed_array_contents_with_the_compiled_binding_size) # identic
 # non-root with a usable user namespace.
 test(suite::approvals::approving_execpolicy_amendment_persists_policy_and_skips_future_prompts) # bwrap userns refused on nodef-gha-public-rust, fork-ci run 43114813312
 test(suite::approvals::spawned_subagent_execpolicy_amendment_propagates_to_parent_session) # bwrap userns refused on nodef-gha-public-rust, fork-ci run 43114813312
+# Flaky under full-suite load on nodef-gha-public-rust (WI-4129): the scoped tools/list count
+# is 2 where 1 is expected (an extra codex_apps listing races the turn). Failed both tries in
+# fork-ci run 43152854593; passed in run 43127706154 on identical test code and locally in
+# isolation (23/23). Reverse once the extra listing is made deterministic.
+test(suite::v2::web_search::model_lab_search_provider::critical_discovery_error) # flaky race on nodef-gha-public-rust, fork-ci run 43152854593 (WI-4129)
+test(suite::v2::web_search::model_lab_search_provider::host_disables_literature_only) # flaky race on nodef-gha-public-rust, fork-ci run 43152854593 (WI-4129)
+test(suite::v2::web_search::model_lab_search_provider::inherit_connector_version) # flaky race on nodef-gha-public-rust, fork-ci run 43152854593 (WI-4129)
