@@ -635,29 +635,35 @@ enum DiscoveryFailure {
 }
 
 /// Model Lab selection is resolved for the active turn on the same app-server used by both clients.
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standard, false; "xatu_literature_treatment")]
-#[test_case::test_case(XATU_V99, (&[], false), None, SearchPolicy::Standard, false; "xatu_control")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::Standard, false; "critical_discovery_error")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32602)), SearchPolicy::Standard, false; "invalid_discovery_request")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Http(503)), SearchPolicy::Standard, false; "service_unavailable_after_retries_allows_fallback")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Http(403)), SearchPolicy::Standard, false; "forbidden_discovery_disables_search")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::HostedOnly, false; "work_hosted_only")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::HostedOnly, false; "work_prohibits_native_fallback")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standard, true; "failed_invocation_never_replays_on_native")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, false), None, SearchPolicy::Standard, false; "host_disables_literature_only")]
-#[test_case::test_case(XATU_V99, (&["other_model_tool"], false), None, SearchPolicy::Standard, false; "model_with_other_supported_tools")]
-#[test_case::test_case("SonicBrowserToolV66", (PAPER_MODEL_TOOLS, false), None, SearchPolicy::Standard, false; "inherit_connector_version")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNative, false; "managed_native_requirement")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeClientMcp, false; "native_requirement_overrides_client_mcp_without_model_preference")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeCached, false; "native_requirement_enforces_cached_turn")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeTelemetry, false; "native_requirement_with_telemetry_and_no_search_connector")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeDomainPolicy, false; "native_requirement_cannot_bypass_connector_domain_policy")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standalone(WebSearchMode::Cached), false; "standalone_model_honors_cached_turn")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standalone(WebSearchMode::Live), false; "desktop_installation_id_preserves_standalone_search")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::HostAllowedDomains(&[]), false; "empty_host_and_native_domain_lists_deny_fallback")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::HostAllowedDomains(&["example.com"]), false; "matching_query_filter_cannot_authorize_cached_navigation")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standalone(WebSearchMode::Disabled), false; "standalone_model_honors_disabled_turn")]
-#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Disabled, false; "metadata_cannot_authorize_search")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standard, false, false; "xatu_literature_treatment")]
+#[test_case::test_case(XATU_V99, (&[], false), None, SearchPolicy::Standard, false, false; "xatu_control")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::Standard, false, false; "critical_discovery_error")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32602)), SearchPolicy::Standard, false, false; "invalid_discovery_request")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Http(503)), SearchPolicy::Standard, false, false; "service_unavailable_after_retries_allows_fallback")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Http(403)), SearchPolicy::Standard, false, false; "forbidden_discovery_disables_search")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::HostedOnly, false, false; "work_hosted_only")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::HostedOnly, false, false; "work_prohibits_native_fallback")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standard, true, false; "failed_invocation_never_replays_on_native")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, false), None, SearchPolicy::Standard, false, false; "host_disables_literature_only")]
+#[test_case::test_case(XATU_V99, (&["other_model_tool"], false), None, SearchPolicy::Standard, false, false; "model_with_other_supported_tools")]
+#[test_case::test_case("SonicBrowserToolV66", (PAPER_MODEL_TOOLS, false), None, SearchPolicy::Standard, false, false; "inherit_connector_version")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNative, false, false; "managed_native_requirement")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeClientMcp, false, false; "native_requirement_overrides_client_mcp_without_model_preference")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeCached, false, false; "native_requirement_enforces_cached_turn")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeTelemetry, false, false; "native_requirement_with_telemetry_and_no_search_connector")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::RequireNativeDomainPolicy, false, false; "native_requirement_cannot_bypass_connector_domain_policy")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standalone(WebSearchMode::Cached), false, false; "standalone_model_honors_cached_turn")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standalone(WebSearchMode::Live), false, false; "desktop_installation_id_preserves_standalone_search")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::HostAllowedDomains(&[]), false, false; "empty_host_and_native_domain_lists_deny_fallback")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::HostAllowedDomains(&["example.com"]), false, false; "matching_query_filter_cannot_authorize_cached_navigation")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standalone(WebSearchMode::Disabled), false, false; "standalone_model_honors_disabled_turn")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Disabled, false, false; "metadata_cannot_authorize_search")]
+// Apps finishing startup after the turn starts must not repeat discovery on a later step.
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::Standard, false, true; "late_apps_startup_critical_discovery_error")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), None, SearchPolicy::Standard, true, true; "late_apps_startup_failed_invocation_never_replays_on_native")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, false), None, SearchPolicy::Standard, false, true; "late_apps_startup_host_disables_literature_only")]
+#[test_case::test_case("SonicBrowserToolV66", (PAPER_MODEL_TOOLS, false), None, SearchPolicy::Standard, false, true; "late_apps_startup_inherit_connector_version")]
+#[test_case::test_case(XATU_V99, (PAPER_MODEL_TOOLS, true), Some(DiscoveryFailure::Rpc(-32603)), SearchPolicy::HostAllowedDomains(&["example.com"]), false, true; "late_apps_startup_matching_query_filter_cannot_authorize_cached_navigation")]
 #[tokio::test]
 async fn model_lab_search_provider(
     pinned_type: &str,
@@ -665,6 +671,7 @@ async fn model_lab_search_provider(
     error: Option<DiscoveryFailure>,
     policy: SearchPolicy,
     invocation_error: bool,
+    late_apps_startup: bool,
 ) -> Result<()> {
     use core_test_support::apps_test_server::AppsTestServer;
     use std::sync::Arc;
@@ -682,6 +689,31 @@ async fn model_lab_search_provider(
     };
     let apps =
         AppsTestServer::mount_with_tools(&server, Arc::new(Mutex::new(catalog_tools))).await?;
+    if late_apps_startup {
+        // Hold Apps initialization so codex_apps becomes ready after the turn has started and
+        // the next sampling step captures a new MCP binding for the same Apps transport.
+        Mock::given(method("POST"))
+            .and(wiremock::matchers::body_partial_json(
+                json!({"method": "initialize"}),
+            ))
+            .respond_with(|r: &wiremock::Request| {
+                let req: Value = r.body_json().expect("JSON-RPC request");
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(/*millis*/ 500))
+                    .set_body_json(json!({
+                        "jsonrpc": "2.0",
+                        "id": req["id"],
+                        "result": {
+                            "protocolVersion": req["params"]["protocolVersion"],
+                            "capabilities": {"tools": {"listChanged": true}},
+                            "serverInfo": {"name": "codex-apps-test", "version": "1.0.0"}
+                        }
+                    }))
+            })
+            .with_priority(1)
+            .mount(&server)
+            .await;
+    }
     let mut pinned = tool;
     let search_query = if pinned_type == "SonicBrowserToolV66" {
         let properties = pinned["inputSchema"]["properties"]

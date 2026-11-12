@@ -377,12 +377,37 @@ pub(crate) async fn resolve(
     request.insert("openai/search_context".into(), json!(&context));
     turn_meta["mcp_request_meta"] = json!(&request);
     // Only discovery is stable within the turn. A yielded search can finish on a later step.
-    let cached = turn
+    // A later step may get a new binding when an unrelated catalog settles (for example Apps
+    // finishing startup mid-turn); that must not repeat discovery while the same Apps
+    // transport still serves the same search tool.
+    let reused = turn
         .extension_data
         .get::<CachedSearch>()
-        .filter(|cached| Arc::ptr_eq(&cached.base, base) && cached.request == request);
-    let fresh = cached.is_none();
-    let cached = match cached {
+        .filter(|cached| cached.request == request)
+        .and_then(|cached| {
+            if Arc::ptr_eq(&cached.base, base) {
+                return Some(cached);
+            }
+            if !base.shares_model_search_source(&cached.base) {
+                return None;
+            }
+            let discovery = match &cached.discovery {
+                SearchDiscovery::Ready(discovered) => {
+                    SearchDiscovery::Ready(base.rebase_model_search(discovered)?)
+                }
+                SearchDiscovery::Critical(reason) => SearchDiscovery::Critical(reason),
+                SearchDiscovery::Unavailable => SearchDiscovery::Unavailable,
+            };
+            let rebased = Arc::new(CachedSearch {
+                base: Arc::clone(base),
+                request: cached.request.clone(),
+                discovery,
+            });
+            turn.extension_data.insert_arc(Arc::clone(&rebased));
+            Some(rebased)
+        });
+    let fresh = reused.is_none();
+    let cached = match reused {
         Some(cached) => cached,
         None => {
             let cached = Arc::new(CachedSearch {
