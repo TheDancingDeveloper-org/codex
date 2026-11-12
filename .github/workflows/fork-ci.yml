@@ -280,13 +280,14 @@ jobs:
     name: test
     needs: plan
     if: needs.plan.outputs.rust == 'true'
-    # bigmem pins this half to nodef-gha-public-rust (24 GiB): rust-heavy,node-f
-    # also matches nodef-gha-public-docker (10 GiB), where codex-core's `all`
-    # test binary was OOM-killed even at two jobs (run 43317835444). bigmem is
-    # a strict subset of rust-heavy; node-b's bigmem runners lack node-f. The
-    # app-server half below stays on either node-f runner, so the two halves
-    # can still run side by side (WI-4161).
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","bigmem","node-f"]') }}
+    # Both heavy halves (this one and test-app-server) run on [self-hosted,
+    # bigmem]. Two runners carry bigmem, 24 GiB each: ci-bigmem-0 (k8s,
+    # winrarhost1, 8 CPU) and nodef-gha-public-rust (node-f), so the halves
+    # run side by side, one per runner. rust-heavy,node-f would also match
+    # the 10 GiB nodef-gha-public-docker, where codex-core's `all` test binary
+    # was OOM-killed even at two jobs (run 43317835444); node-f would exclude
+    # ci-bigmem-0. No runner or label change is needed (WI-4161).
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","bigmem"]') }}
     # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:
@@ -390,7 +391,8 @@ jobs:
     name: test (app-server integration)
     needs: plan
     if: needs.plan.outputs.rust == 'true'
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","node-f"]') }}
+    # bigmem, like the test half above: the other 24 GiB runner (WI-4161).
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","bigmem"]') }}
     # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:
