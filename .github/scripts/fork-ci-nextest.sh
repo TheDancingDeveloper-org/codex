@@ -33,6 +33,17 @@ fi
 
 jobs="$("${GITHUB_WORKSPACE}/.github/scripts/fork-ci-build-jobs.sh")"
 
+# An OOM kill of rustc surfaces only as kache's `exit status: 1` with no
+# diagnostic, so say so when the cgroup recorded one.
+report_oom() {
+  [[ -r /sys/fs/cgroup/memory.events ]] || return 0
+  local kills
+  kills="$(awk '$1 == "oom_kill" {print $2}' /sys/fs/cgroup/memory.events)"
+  (( ${kills:-0} > 0 )) && echo "::error::the runner cgroup recorded ${kills} OOM kill(s); a compile failure without a diagnostic is the OOM killer"
+  return 0
+}
+trap report_oom EXIT
+
 # Tests resolve helper binaries in other packages through cargo_bin(), and
 # `cargo test -p` never builds another package's bins, so CARGO_BIN_EXE_* is
 # unset and the lookup in target/debug misses. Upstream's Bazel build declares
