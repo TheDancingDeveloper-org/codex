@@ -29,32 +29,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: fmt, clippy, test
+  # The ruleset requires one check, `fmt, clippy, test` (the last job below).
+  # The work runs as parallel jobs under other names, and that job reports
+  # their combined result, so the required context never changes. Splitting
+  # took the merge_group run from 95-105 minutes (one serial job, past the
+  # queue's 90-minute timeout) to the length of its longest half (WI-4161).
+  plan:
+    name: plan
     # Trusted runs (same-repo PRs, workflow_dispatch) use the GCP Spot runner
     # (30 vCPU, persistent sccache; started on demand by the Node B poller).
     # Fork PRs stay on GitHub-hosted runners: a persistent self-hosted runner
     # must never execute untrusted fork code.
     # Temporarily pinned to node-f (WI-4100): ci-k8s-1's 98 GB scratch volume is too small for a Codex workspace build (ENOSPC). Remove the node-f label once the k8s runners have enough scratch.
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","node-f"]') }}
-    # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:
         working-directory: codex-rs
-    env:
-      # CI-scoped build settings from the cargo build-performance guide.
-      # Job env only: upstream's profiles in Cargo.toml stay untouched.
-      # line-tables-only keeps file/line in backtraces (tests do read them)
-      # while dropping variable debuginfo, which dominates codegen and linking.
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      CARGO_PROFILE_TEST_DEBUG: line-tables-only
-      # CI builds once per crate version; incremental caches never pay back.
-      CARGO_INCREMENTAL: "0"
-      # No RUSTFLAGS. Stable rustc 1.95 on x86_64-unknown-linux-gnu already
-      # links with its bundled rust-lld (the self-contained linker, shipped in
-      # the sysroot since 1.90). -fuse-ld=lld would need a system lld and a
-      # different linker, and nightly-only options (-Zthreads, cranelift) are
-      # out: this job pins stable.
+    outputs:
+      rust: ${{ steps.crates.outputs.rust }}
+      list: ${{ steps.crates.outputs.list }}
+      all: ${{ steps.crates.outputs.all }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
         with:
@@ -77,36 +71,6 @@ jobs:
         uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
           components: rustfmt, clippy
-
-      # Same pin upstream uses in rust-ci-full-nextest-platform.yml, so
-      # codex-rs/.config/nextest.toml (serialized test groups, retries, slow
-      # timeouts) applies to the fork's tests too.
-      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
-        with:
-          tool: nextest
-          version: 0.9.103
-
-      # linux-sandbox's build.rs links libcap through pkg-config. bubblewrap is
-      # what the sandbox tests actually run.
-      # The rust-heavy runner preinstalls these at boot; jobs there have no sudo.
-      - name: Install build libraries
-        if: runner.environment == 'github-hosted'
-        working-directory: ${{ github.workspace }}
-        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
-
-      # Ubuntu 24.04's AppArmor user-namespace restriction blocks bwrap, so
-      # every sandbox test fails without this. Copied from
-      # .github/actions/setup-ci/action.yml, which upstream's Linux nextest
-      # jobs run before testing.
-      # rust-heavy applies these sysctls at boot (/etc/sysctl.d/60-gha-userns.conf).
-      - name: Allow unprivileged user namespaces
-        if: runner.environment == 'github-hosted'
-        working-directory: ${{ github.workspace }}
-        run: |
-          sudo sysctl -w kernel.unprivileged_userns_clone=1
-          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
 
       # Directory names are not package names (app-server-protocol is the
       # package codex-app-server-protocol) and crates nest (codex-rs/ext/skills),
@@ -213,6 +177,16 @@ jobs:
           # fails on glib-2.0.pc.
           mapfile -t packages < <(printf '%s\n' "${packages[@]}" | awk '$0 != "codex-voice-host"')
           echo "changed: ${packages[*]:-none}"
+          # Whether the selection is every workspace member clippy can build.
+          # Then clippy --all-targets compiles exactly what `cargo check
+          # --workspace --all-targets` would, and lint skips the separate check.
+          mapfile -t members < <(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[].name' | awk '$0 != "codex-voice-host"' | sort -u)
+          if [[ "$(printf '%s\n' "${members[@]}" | sort -u)" == "$(printf '%s\n' "${packages[@]:-}" | sed '/^$/d' | sort -u)" ]]; then
+            echo "all=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "all=false" >> "$GITHUB_OUTPUT"
+          fi
           {
             echo "list<<EOF"
             printf '%s\n' "${packages[@]:-}"
@@ -222,12 +196,79 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+  lint:
+    name: fmt, clippy
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","node-f"]') }}
+    # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      # CI-scoped build settings from the cargo build-performance guide.
+      # Job env only: upstream's profiles in Cargo.toml stay untouched.
+      # line-tables-only keeps file/line in backtraces (tests do read them)
+      # while dropping variable debuginfo, which dominates codegen and linking.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      # CI builds once per crate version; incremental caches never pay back.
+      CARGO_INCREMENTAL: "0"
+      # No RUSTFLAGS. Stable rustc 1.95 on x86_64-unknown-linux-gnu already
+      # links with its bundled rust-lld (the self-contained linker, shipped in
+      # the sysroot since 1.90). -fuse-ld=lld would need a system lld and a
+      # different linker, and nightly-only options (-Zthreads, cranelift) are
+      # out: this job pins stable.
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # fork/main sits on an upstream release tag, whose release commit bumps
+      # the workspace version from 0.0.0 to the tag (Cargo.lock keeps 0.0.0).
+      # Upstream runs its tests at 0.0.0 and never on the tag commit, so its
+      # snapshots render "v0.0.0" and its daemon tests rely on 0.0.0 counting
+      # as a dev build. Test at 0.0.0 the same way. fork-release stamps the
+      # real version separately, so releases are unaffected.
+      - name: Test at upstream's development version
+        run: |
+          sed -i '/^\[workspace.package\]$/,/^\[/ s/^version = ".*"$/version = "0.0.0"/' Cargo.toml
+          grep -A1 '^\[workspace.package\]$' Cargo.toml | grep -qx 'version = "0.0.0"' \
+            || { echo "workspace version reset did not land" >&2; exit 1; }
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt, clippy
+
+      # linux-sandbox's build.rs links libcap through pkg-config. bubblewrap is
+      # what the sandbox tests actually run.
+      # The rust-heavy runner preinstalls these at boot; jobs there have no sudo.
+      - name: Install build libraries
+        if: runner.environment == 'github-hosted'
+        working-directory: ${{ github.workspace }}
+        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
+
+      # Ubuntu 24.04's AppArmor user-namespace restriction blocks bwrap, so
+      # every sandbox test fails without this. Copied from
+      # .github/actions/setup-ci/action.yml, which upstream's Linux nextest
+      # jobs run before testing.
+      # rust-heavy applies these sysctls at boot (/etc/sysctl.d/60-gha-userns.conf).
+      - name: Allow unprivileged user namespaces
+        if: runner.environment == 'github-hosted'
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
       # v8's build.rs otherwise downloads librusty_v8 from denoland, which does
       # not publish the ptrcomp_sandbox profile this tree expects. This fetches
       # the Codex-built artifacts from the upstream release and verifies them
       # against the in-tree checksum manifest, the same as fork-release.
       - name: Configure rusty_v8 artifact overrides and verify checksums
-        if: steps.crates.outputs.rust == 'true'
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: x86_64-unknown-linux-gnu
@@ -236,19 +277,18 @@ jobs:
       # and it requires gstreamer-1.0 >= 1.28. Ubuntu 24.04 ships 1.24, so no
       # apt package satisfies it. Upstream never builds it with cargo either; it
       # builds //codex-rs/voice-host with Bazel against a bundled GStreamer.
-      # Two jobs for the same reason as clippy below (WI-3954): at full width
-      # rustc on codex-core's `all` test target was OOMKilled at the
-      # nodef-gha-public-docker runner's 10 GiB limit (fork-ci run 43003880297).
+      # Skipped when the selection is every member: clippy below then compiles
+      # the same targets, and fails on every rustc error itself.
       - name: cargo check
-        if: steps.crates.outputs.rust == 'true'
-        run: cargo check --workspace --all-targets --exclude codex-voice-host --jobs 2
+        if: needs.plan.outputs.all != 'true'
+        shell: bash
+        run: cargo check --workspace --all-targets --exclude codex-voice-host --jobs "$("${GITHUB_WORKSPACE}/.github/scripts/fork-ci-build-jobs.sh")"
 
       - name: cargo fmt
-        if: steps.crates.outputs.rust == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t crates < <(printf '%s\n' "${{ steps.crates.outputs.list }}" | sed '/^$/d')
+          mapfile -t crates < <(printf '%s\n' "${{ needs.plan.outputs.list }}" | sed '/^$/d')
           (( ${#crates[@]} )) || exit 0
           args=()
           for crate in "${crates[@]}"; do args+=(-p "$crate"); done
@@ -257,10 +297,10 @@ jobs:
       # -D warnings would fail the PR on upstream lint debt in lines it never
       # touched, and a fork patch must not have to fix that. Clippy runs without
       # it, and only a warning or error whose primary span overlaps a hunk this
-      # PR changed fails the build. Compile errors are fatal regardless, which
-      # `cargo check` above already enforces.
+      # PR changed fails the build. Compile errors are fatal regardless: this
+      # step fails on any rustc error, and `cargo check` above also runs when
+      # the selection is not the whole workspace.
       - name: cargo clippy
-        if: steps.crates.outputs.rust == 'true'
         shell: bash
         env:
           QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
@@ -273,7 +313,7 @@ jobs:
             | awk '/^diff --git/{file=$4; sub(/^b\/codex-rs\//, "", file)}
                    /^@@/{split($3,a,","); sub(/^\+/, "", a[1]); print file, a[1], (a[2] == "" ? 1 : a[2])}' \
             > /tmp/changed-lines
-          mapfile -t crates < <(printf '%s\n' "${{ steps.crates.outputs.list }}" | sed '/^$/d')
+          mapfile -t crates < <(printf '%s\n' "${{ needs.plan.outputs.list }}" | sed '/^$/d')
           (( ${#crates[@]} )) || exit 0
           args=()
           for crate in "${crates[@]}"; do args+=(-p "$crate"); done
@@ -283,13 +323,35 @@ jobs:
           # cargo-timing.html, which the next cargo step overwrites, so copy it
           # aside immediately.
           mkdir -p /tmp/cargo-timings
-          # Two jobs, not the runner's four: a whole-workspace --all-targets
-          # clippy peaks above the runner's 11 GiB memory limit at full width
-          # (ci-k8s-1 was OOMKilled mid-clippy, WI-3954). Two rustc at a time
-          # keeps the peak under the limit.
-          cargo clippy "${args[@]}" --all-targets --jobs 2 --timings --message-format=json -- -W clippy::all \
-            > /tmp/clippy.json || true
+          clippy_status=0
+          # Width from the runner's cores and memory limit: a whole-workspace
+          # --all-targets clippy at full width was OOMKilled at an 11 GiB limit
+          # (WI-3954). See fork-ci-build-jobs.sh.
+          jobs="$("${GITHUB_WORKSPACE}/.github/scripts/fork-ci-build-jobs.sh")"
+          cargo clippy "${args[@]}" --all-targets --jobs "$jobs" --timings --message-format=json -- -W clippy::all \
+            > /tmp/clippy.json || clippy_status=$?
           [[ -f cargo-timing.html ]] && cp cargo-timing.html /tmp/cargo-timings/clippy-timing.html
+          # Compile errors are fatal anywhere, as `cargo check` makes them (it is
+          # skipped when this run covers every member). Only clippy's own lints
+          # are gated by changed hunk.
+          rustc_errors="$(jq -r '
+            select(.reason == "compiler-message")
+            | .message
+            | select(.level == "error")
+            | select(((.code.code // "") | startswith("clippy::")) | not)
+            | .rendered' /tmp/clippy.json)"
+          if [[ -n "$rustc_errors" ]]; then
+            echo "$rustc_errors"
+            echo "compile errors" >&2
+            exit 1
+          fi
+          # A failed build with no error diagnostic at all (a build script or
+          # the linker failed) is fatal too; a failure that is only clippy's
+          # own deny-level lints falls through to the hunk gate below.
+          if (( clippy_status != 0 )) && ! jq -e 'select(.reason == "compiler-message" and .message.level == "error")' /tmp/clippy.json >/dev/null; then
+            echo "cargo clippy failed (exit $clippy_status) without a compiler diagnostic" >&2
+            exit 1
+          fi
           # The gate is by changed hunk, so it reads the whole stream once.
           # Splitting per crate first drops every lint from a crate whose
           # package id omits the name (cargo does that when the name equals the
@@ -319,70 +381,238 @@ jobs:
             exit 1
           fi
 
-      - name: cargo test
-        if: steps.crates.outputs.rust == 'true'
+      # Uploaded even when the job failed: the report is most useful then.
+      - name: Upload cargo timings
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: cargo-timings-lint
+          path: /tmp/cargo-timings/
+          if-no-files-found: ignore
+
+  test:
+    name: test
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","node-f"]') }}
+    # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      # CI-scoped build settings from the cargo build-performance guide.
+      # Job env only: upstream's profiles in Cargo.toml stay untouched.
+      # line-tables-only keeps file/line in backtraces (tests do read them)
+      # while dropping variable debuginfo, which dominates codegen and linking.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      # CI builds once per crate version; incremental caches never pay back.
+      CARGO_INCREMENTAL: "0"
+      # No RUSTFLAGS. Stable rustc 1.95 on x86_64-unknown-linux-gnu already
+      # links with its bundled rust-lld (the self-contained linker, shipped in
+      # the sysroot since 1.90). -fuse-ld=lld would need a system lld and a
+      # different linker, and nightly-only options (-Zthreads, cranelift) are
+      # out: this job pins stable.
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # fork/main sits on an upstream release tag, whose release commit bumps
+      # the workspace version from 0.0.0 to the tag (Cargo.lock keeps 0.0.0).
+      # Upstream runs its tests at 0.0.0 and never on the tag commit, so its
+      # snapshots render "v0.0.0" and its daemon tests rely on 0.0.0 counting
+      # as a dev build. Test at 0.0.0 the same way. fork-release stamps the
+      # real version separately, so releases are unaffected.
+      - name: Test at upstream's development version
+        run: |
+          sed -i '/^\[workspace.package\]$/,/^\[/ s/^version = ".*"$/version = "0.0.0"/' Cargo.toml
+          grep -A1 '^\[workspace.package\]$' Cargo.toml | grep -qx 'version = "0.0.0"' \
+            || { echo "workspace version reset did not land" >&2; exit 1; }
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt, clippy
+
+      # Same pin upstream uses in rust-ci-full-nextest-platform.yml, so
+      # codex-rs/.config/nextest.toml (serialized test groups, retries, slow
+      # timeouts) applies to the fork's tests too.
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+
+      # linux-sandbox's build.rs links libcap through pkg-config. bubblewrap is
+      # what the sandbox tests actually run.
+      # The rust-heavy runner preinstalls these at boot; jobs there have no sudo.
+      - name: Install build libraries
+        if: runner.environment == 'github-hosted'
+        working-directory: ${{ github.workspace }}
+        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
+
+      # Ubuntu 24.04's AppArmor user-namespace restriction blocks bwrap, so
+      # every sandbox test fails without this. Copied from
+      # .github/actions/setup-ci/action.yml, which upstream's Linux nextest
+      # jobs run before testing.
+      # rust-heavy applies these sysctls at boot (/etc/sysctl.d/60-gha-userns.conf).
+      - name: Allow unprivileged user namespaces
+        if: runner.environment == 'github-hosted'
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      # v8's build.rs otherwise downloads librusty_v8 from denoland, which does
+      # not publish the ptrcomp_sandbox profile this tree expects. This fetches
+      # the Codex-built artifacts from the upstream release and verifies them
+      # against the in-tree checksum manifest, the same as fork-release.
+      - name: Configure rusty_v8 artifact overrides and verify checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+
+      # codex-core's tests overflow the default thread stack (fatal runtime
+      # error: stack overflow). Upstream sets the same 8 MiB floor on its
+      # test step in rust-ci.yml.
+      - name: cargo nextest (all but app-server integration)
         shell: bash
-        # codex-core's tests overflow the default thread stack (fatal runtime
-        # error: stack overflow). Upstream sets the same 8 MiB floor on its
-        # test step in rust-ci.yml.
         env:
           RUST_MIN_STACK: "8388608"
-        run: |
-          set -euo pipefail
-          # Tests resolve helper binaries in other packages through
-          # cargo_bin(), and `cargo test -p` never builds another package's
-          # bins, so CARGO_BIN_EXE_* is unset and the lookup in target/debug
-          # misses. Upstream's Bazel build declares them as data deps. Build
-          # every workspace bin once first. codex-voice-host is excluded
-          # because it needs GStreamer >= 1.28, which Ubuntu 24.04 lacks.
-          # Two rustc at a time, like check and clippy: on a cold kache this
-          # step compiled the whole workspace at full width, reached ~20 GiB in
-          # node-f's 24 GiB runner cgroup and the OOM killer took a compile
-          # process. fork-ci run 43136846045 (merge_group for PR #37) showed it
-          # only as a silent `kache ... (exit status: 1)` on codex-core's test
-          # target; the same tree and runner passed with a warm cache in run
-          # 43127706154.
-          cargo build --workspace --bins --exclude codex-voice-host --jobs 2
-          # nextest UNIONS multiple -E filtersets, so one `not` per line would
-          # re-include every excluded test as soon as the file has two lines.
-          # Build a single disjunction and omit -E entirely when nothing is
-          # listed.
-          known=()
-          while IFS= read -r line; do
-            line="${line%%#*}"
-            line="${line#"${line%%[![:space:]]*}"}"
-            [[ -z "$line" ]] && continue
-            known+=("(${line})")
-          done < "${GITHUB_WORKSPACE}/.github/fork-ci-known-failures.txt"
-          filter=()
-          if (( ${#known[@]} > 0 )); then
-            joined="$(printf '%s | ' "${known[@]}")"
-            filter=(-E "not (${joined% | })")
-          fi
-          # A failing crate must not hide the rest: the baseline needs every
-          # crate's result, and a PR should see all of its failures at once.
-          # nextest is fail-fast by default and cancels a crate's remaining
-          # tests at its first failure, so --no-fail-fast does the same within
-          # a crate.
-          status=0
-          mapfile -t crates < <(printf '%s\n' "${{ steps.crates.outputs.list }}" | sed '/^$/d')
-          if (( ${#crates[@]} )); then
-            args=()
-            for crate in "${crates[@]}"; do args+=(-p "$crate"); done
-            # One invocation: per-crate loops re-resolved features and rebuilt
-            # shared dependencies once per crate. --timings records the
-            # critical path next to clippy's. --build-jobs caps the test-build
-            # compiles for the same memory reason as the bins build above.
-            cargo nextest run "${args[@]}" --no-fail-fast --build-jobs 2 --timings "${filter[@]}" || status=1
-            [[ -f cargo-timing.html ]] && cp cargo-timing.html /tmp/cargo-timings/nextest-timing.html
-          fi
-          exit "$status"
+          PACKAGES: ${{ needs.plan.outputs.list }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/fork-ci-nextest.sh" rest
 
       # Uploaded even when the job failed: the report is most useful then.
       - name: Upload cargo timings
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: cargo-timings
+          name: cargo-timings-test
           path: /tmp/cargo-timings/
           if-no-files-found: ignore
+
+  test-app-server:
+    name: test (app-server integration)
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","node-f"]') }}
+    # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      # CI-scoped build settings from the cargo build-performance guide.
+      # Job env only: upstream's profiles in Cargo.toml stay untouched.
+      # line-tables-only keeps file/line in backtraces (tests do read them)
+      # while dropping variable debuginfo, which dominates codegen and linking.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      # CI builds once per crate version; incremental caches never pay back.
+      CARGO_INCREMENTAL: "0"
+      # No RUSTFLAGS. Stable rustc 1.95 on x86_64-unknown-linux-gnu already
+      # links with its bundled rust-lld (the self-contained linker, shipped in
+      # the sysroot since 1.90). -fuse-ld=lld would need a system lld and a
+      # different linker, and nightly-only options (-Zthreads, cranelift) are
+      # out: this job pins stable.
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # fork/main sits on an upstream release tag, whose release commit bumps
+      # the workspace version from 0.0.0 to the tag (Cargo.lock keeps 0.0.0).
+      # Upstream runs its tests at 0.0.0 and never on the tag commit, so its
+      # snapshots render "v0.0.0" and its daemon tests rely on 0.0.0 counting
+      # as a dev build. Test at 0.0.0 the same way. fork-release stamps the
+      # real version separately, so releases are unaffected.
+      - name: Test at upstream's development version
+        run: |
+          sed -i '/^\[workspace.package\]$/,/^\[/ s/^version = ".*"$/version = "0.0.0"/' Cargo.toml
+          grep -A1 '^\[workspace.package\]$' Cargo.toml | grep -qx 'version = "0.0.0"' \
+            || { echo "workspace version reset did not land" >&2; exit 1; }
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt, clippy
+
+      # Same pin upstream uses in rust-ci-full-nextest-platform.yml, so
+      # codex-rs/.config/nextest.toml (serialized test groups, retries, slow
+      # timeouts) applies to the fork's tests too.
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+
+      # linux-sandbox's build.rs links libcap through pkg-config. bubblewrap is
+      # what the sandbox tests actually run.
+      # The rust-heavy runner preinstalls these at boot; jobs there have no sudo.
+      - name: Install build libraries
+        if: runner.environment == 'github-hosted'
+        working-directory: ${{ github.workspace }}
+        run: sudo apt-get update && sudo apt-get install -y libcap-dev pkg-config libasound2-dev bubblewrap
+
+      # Ubuntu 24.04's AppArmor user-namespace restriction blocks bwrap, so
+      # every sandbox test fails without this. Copied from
+      # .github/actions/setup-ci/action.yml, which upstream's Linux nextest
+      # jobs run before testing.
+      # rust-heavy applies these sysctls at boot (/etc/sysctl.d/60-gha-userns.conf).
+      - name: Allow unprivileged user namespaces
+        if: runner.environment == 'github-hosted'
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      # v8's build.rs otherwise downloads librusty_v8 from denoland, which does
+      # not publish the ptrcomp_sandbox profile this tree expects. This fetches
+      # the Codex-built artifacts from the upstream release and verifies them
+      # against the in-tree checksum manifest, the same as fork-release.
+      - name: Configure rusty_v8 artifact overrides and verify checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+
+      # codex-core's tests overflow the default thread stack (fatal runtime
+      # error: stack overflow). Upstream sets the same 8 MiB floor on its
+      # test step in rust-ci.yml.
+      - name: cargo nextest (app-server integration)
+        shell: bash
+        env:
+          RUST_MIN_STACK: "8388608"
+          PACKAGES: ${{ needs.plan.outputs.list }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/fork-ci-nextest.sh" app-server
+
+      # Uploaded even when the job failed: the report is most useful then.
+      - name: Upload cargo timings
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: cargo-timings-test-app-server
+          path: /tmp/cargo-timings/
+          if-no-files-found: ignore
+
+  # The required check. It passes only when every job above passed, or was
+  # skipped because the diff touches no Rust (path scope). It runs on a
+  # GitHub-hosted runner: it only reads the other jobs' results.
+  result:
+    name: fmt, clippy, test
+    if: always()
+    needs: [plan, lint, test, test-app-server]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: All fork-ci jobs passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e '[.[].result] | all(. == "success" or . == "skipped")' >/dev/null \
+            || { echo "a fork-ci job failed or was cancelled" >&2; exit 1; }
+          echo "$RESULTS" | jq -e '.plan.result == "success"' >/dev/null \
+            || { echo "plan did not run" >&2; exit 1; }
