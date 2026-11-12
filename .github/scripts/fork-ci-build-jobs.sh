@@ -12,7 +12,18 @@
 # linker) / 4 GiB), at least 1: 2 on the 10 GiB runner, as the old fixed
 # --jobs 2 that passed there, and 5 on the 24 GiB one. On a runner with no
 # cgroup limit the host's MemTotal is the limit.
+#
+#   fork-ci-build-jobs.sh               width for an ordinary build
+#   fork-ci-build-jobs.sh integration   width for the integration test
+#                                       binaries: 1 below 16 GiB
+#
+# The integration width exists because even 2 rustc at once OOMed on the
+# 10 GiB runner while compiling and linking codex-core's `all` test binary
+# (run 43317835444, 2 OOM kills). Below 16 GiB those binaries build one at a
+# time; at or above it the ordinary width applies.
 set -euo pipefail
+mode="${1:-build}"
+small_kib=$((16 * 1024 * 1024))
 per_job_kib=$((4 * 1024 * 1024))
 reserve_kib=$((2 * 1024 * 1024))
 cores="$(nproc)"
@@ -30,5 +41,10 @@ fi
 jobs=$(((limit_kib - reserve_kib) / per_job_kib))
 (( jobs > cores )) && jobs="$cores"
 (( jobs < 1 )) && jobs=1
-echo "cores=$cores memory_limit_gib=$((limit_kib / 1024 / 1024)) build_jobs=$jobs" >&2
+reason="min(cores, (limit - 2 GiB) / 4 GiB)"
+if [[ "$mode" == "integration" ]] && (( limit_kib < small_kib )); then
+  jobs=1
+  reason="integration test binaries below 16 GiB build one at a time"
+fi
+echo "cores=$cores memory_limit_gib=$((limit_kib / 1024 / 1024)) mode=$mode build_jobs=$jobs ($reason)" >&2
 echo "$jobs"

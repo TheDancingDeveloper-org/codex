@@ -70,6 +70,21 @@ echo "filter: $expr"
 
 args=()
 for crate in "${crates[@]}"; do args+=(-p "$crate"); done
+
+# Build the test targets before nextest does, in two widths. Libraries, bins
+# and every dependency build at the full width; then the integration test
+# binaries build at the integration width, which is 1 below 16 GiB because
+# codex-core's `all` binary OOMed at width 2 on 10 GiB (run 43317835444).
+# Same targets and flags as nextest's own `cargo test --no-run`, so its build
+# below finds everything fresh and only lists the binaries. Nothing is
+# skipped: every target nextest would build is built here.
+int_jobs="$("${GITHUB_WORKSPACE}/.github/scripts/fork-ci-build-jobs.sh" integration)"
+if (( int_jobs < jobs )); then
+  cargo test --no-run "${args[@]}" --lib --bins --jobs "$jobs"
+  cargo test --no-run "${args[@]}" --jobs "$int_jobs"
+  jobs="$int_jobs"
+fi
+
 # A failing crate must not hide the rest: --no-fail-fast keeps nextest running
 # after the first failure. One invocation for every package: per-crate loops
 # re-resolve features and rebuild shared dependencies once per crate.
