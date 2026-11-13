@@ -67,8 +67,11 @@ ref, so entries never cancel each other.
 
 ### Runners
 
-Same-repo PRs, queue entries and `workflow_dispatch` run on the self-hosted GCP
-Spot `rust-heavy` runner. A PR from another fork stays on GitHub-hosted
+Same-repo PRs, queue entries and `workflow_dispatch` run on node-f: the main
+half on `[self-hosted, rust-heavy, node-f]` and the app-server half on
+`[self-hosted, bigmem, node-f]`. `ci-bigmem-0` is not used (its scratch disk is
+too slow for a Codex workspace build). `fork-release` is pinned to
+`[self-hosted, bigmem, node-f]` too. A PR from another fork stays on GitHub-hosted
 `ubuntu-24.04`, so untrusted code never reaches a persistent runner. A
 `merge_group` event is always trusted: only a maintainer can enqueue.
 
@@ -80,18 +83,25 @@ the entry's `merge_group` run. Don't rebase a queued PR by hand.
 
 ## Upstream syncs
 
-A rebase of `fork/main` onto a new upstream tag is a force-push
-(`docs/fork-upstream-sync.md`), not a queued merge. Drain or pause the queue
-before you push the rebase. A sync that merges `upstream/main` instead (PR
-#37) goes through the queue like any PR, and because the selection diffs
-against the upstream merge-base, it tests the carried patches on the new
-base and nothing else. The ruleset below bypasses only the repository
-admin role, which is what lets the `--force-with-lease` push through.
+A sync merges upstream into `fork/main` through a `sync-upstream-<date>` PR
+(the PR #37 model; `docs/fork-upstream-sync.md`). It goes through the queue
+like any PR, and because the selection diffs against the upstream merge-base,
+it tests the carried patches on the new base and nothing else. `fork/main` is
+never rebased or force-pushed: graft follows it, and a non-fast-forward move
+diverges the mirror. Don't run a sync while a graft batch PR is open or
+queued.
 
-## Turning the queue on (operator)
+## Graft batches
 
-`fork/main` has no branch protection and no ruleset today, so `fork-ci` is not
-required and the queue is off. The workflow supports the queue without
-needing it. The exact ruleset is in the WI-1886 PR description: one branch
-ruleset on `fork/main` that requires `fmt, clippy, test` and adds a
-`merge_queue` rule.
+Workers land on the graft line `backlog-1`; oversight cuts `graft/batch-<n>`
+PRs into `fork/main` with `graft-mirror pr-batch backlog-1 --base fork/main`,
+at most daily. A batch merges through the queue (MERGE method, so each land
+keeps its commit), with an Opus-level review when it touches exec, sandbox,
+approvals or auth.
+
+## The queue ruleset
+
+Ruleset 25362303 ("fork/main merge queue") is active on `fork/main`: it
+requires `fmt, clippy, test` and runs a merge queue with the MERGE method
+(grouping ALLGREEN, check timeout 90 min). Only the repository admin role
+bypasses it. The original proposal is in the WI-1886 PR description.

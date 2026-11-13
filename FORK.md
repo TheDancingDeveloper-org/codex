@@ -3,7 +3,7 @@
 This fork carries a small set of patches on top of upstream
 [openai/codex](https://github.com/openai/codex) so the Vogt engine can drive it.
 Upstream lands about 1,500 commits a month, so the patch set is kept small and
-every patch is a separate, rebasable commit. The target is under about 10
+every patch is a separate commit. The target is under about 10
 carried commits. Extension points (config, managed hooks in
 `requirements.toml`, app-server, MCP servers, external binaries) come before
 core edits.
@@ -41,31 +41,34 @@ core edits.
   Thus a release cut from the merged tree reports `0.167.0+fork.<sha>`.
 - All fork work branches off `fork/main` and every fork pull request targets
   `fork/main`. Never open, comment on, or push anything to openai/codex.
-- Vogt pins `fork/main` commit SHAs, not tags and not `main`.
+- Vogt pins `fork/main` commit SHAs, not tags and not `main`
+  (`VOGT_CODEX_SHA` plus the musl binary's sha256 in its
+  `engine/agent-versions.env`); stock npm Codex is refused.
+- `fork/main` is mirrored into graft (repository `codex`). Workers land on
+  the graft line `backlog-1`; oversight cuts `graft/batch-<n>` PRs into
+  `fork/main` (at most daily) that merge through the merge queue. See
+  `docs/fork-upstream-sync.md`.
 
 Upstream history is never rewritten. Upstream commits mirror an internal
 OpenAI repository and carry `GitOrigin-RevId` trailers; leave them intact.
 
-## Rebase procedure
+## Upstream sync procedure
 
 Run this for each new upstream stable tag (`rust-vX.Y.Z`), whenever a tag
 ships. There is no weekly schedule: GitHub runs `schedule` only from the
 default branch, which is the upstream mirror, so the drift check is run on
 `workflow_dispatch` and from the runbook at `docs/fork-upstream-sync.md`.
 
-1. `git fetch upstream --tags` and check out a fresh branch from the tag.
-2. Cherry-pick (or rebase) the carried patch series from `fork/main` onto it,
-   one commit at a time. A patch that no longer applies cleanly is reworked or
-   dropped in its own commit, never squashed into another patch.
-3. Run the patched crates' tests: app-server, tui, core spawn, agents_md,
-   hooks. Regenerate the app-server schema fixtures.
-4. Replay the proxy fixtures against the new Responses request shapes.
-5. Update `fork/main` to the result with `git push --force-with-lease` and
-   publish the release. A rebase onto a new tag is not a fast-forward, and a
-   plain `--force` is never used. The procedure itself, including why each
-   published release tag must stay reachable, is the runbook at
-   `docs/fork-upstream-sync.md`. The release it publishes is tagged
-   `fork-<full sha>`, not the bare SHA.
+Upstream is **merged** into `fork/main` through a `sync-upstream-<date>`
+pull request that goes through the merge queue (the PR #37 model, decision
+D1, 2026-11-13). `fork/main` is never rebased or force-pushed: graft follows
+it, and its follower treats a non-fast-forward move as a divergence. The
+steps, the graft follower, the CI and release runners, and how Vogt pins a
+release are in `docs/fork-upstream-sync.md`.
+
+Superseded: until 2026-11-13 the carried series was rebased onto each tag and
+`fork/main` moved with `git push --force-with-lease`. That is retired; the
+runbook keeps it as a historical note only.
 
 Record the new base tag and any dropped or reworked patch in the table below.
 `.github/workflows/fork-upstream-drift.yml` fails when a newer stable tag has
@@ -101,9 +104,10 @@ After it was re-enabled, the issue bots (`issue-deduplicator`, `issue-labeler`,
 `fork-release` active. `postmerge-ci` (push to `main`, no fork guard) is not
 registered yet and so cannot be disabled ahead of time: after the next mirror
 sync of `main`, cancel its run and `gh workflow disable postmerge-ci`.
-`fork-release` builds x86_64 only, on the self-hosted GCP `rust-heavy` runner,
-whose image bakes the musl build packages (WI-1514); only its short publish job
-runs GitHub-hosted. `fork-upstream-drift` is the check that the recorded base tag, or the
+`fork-release` builds x86_64 only, pinned to node-f
+(`[self-hosted, bigmem, node-f]`, WI-4161), and installs the musl build tools
+when the runner lacks them; only its short publish job runs GitHub-hosted.
+Every push to `fork/main` publishes `fork-<full sha>`. `fork-upstream-drift` is the check that the recorded base tag, or the
 "Upstream fixes taken through" marker, is still the newest stable tag
 (WI-1125). It has no schedule: run it on `workflow_dispatch`, or from the
 sync runbook.
