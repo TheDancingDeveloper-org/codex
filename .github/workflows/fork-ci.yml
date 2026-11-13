@@ -280,14 +280,12 @@ jobs:
     name: test
     needs: plan
     if: needs.plan.outputs.rust == 'true'
-    # Both heavy halves (this one and test-app-server) run on [self-hosted,
-    # bigmem]. Two runners carry bigmem, 24 GiB each: ci-bigmem-0 (k8s,
-    # winrarhost1, 8 CPU) and nodef-gha-public-rust (node-f), so the halves
-    # run side by side, one per runner. rust-heavy,node-f would also match
-    # the 10 GiB nodef-gha-public-docker, where codex-core's `all` test binary
-    # was OOM-killed even at two jobs (run 43317835444); node-f would exclude
-    # ci-bigmem-0. No runner or label change is needed (WI-4161).
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","bigmem"]') }}
+    # Both heavy halves are pinned to node-f (operator, 2026-11-13, WI-4161).
+    # This half runs on [self-hosted, bigmem, node-f], which matches only
+    # nodef-gha-public-rust (24 GiB). codex-core's `all` test binary was
+    # OOM-killed on the 10 GiB nodef-gha-public-docker even at two jobs
+    # (run 43317835444), so this half must not land there.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","bigmem","node-f"]') }}
     # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:
@@ -391,8 +389,12 @@ jobs:
     name: test (app-server integration)
     needs: plan
     if: needs.plan.outputs.rust == 'true'
-    # bigmem, like the test half above: the other 24 GiB runner (WI-4161).
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","bigmem"]') }}
+    # node-f, like the test half above (WI-4161): [self-hosted, rust-heavy,
+    # node-f] matches nodef-gha-public-rust (24 GiB) and nodef-gha-public-docker
+    # (10 GiB). The docker runner is slower: fork-ci-build-jobs.sh sizes the
+    # build from its memory.max and cpu.max (2 jobs, integration binaries 1),
+    # so it neither OOMs nor over-subscribes its CPUs.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["self-hosted","rust-heavy","node-f"]') }}
     # The workspace Cargo.toml is codex-rs/Cargo.toml; the repo root has none.
     defaults:
       run:

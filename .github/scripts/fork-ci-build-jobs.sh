@@ -13,11 +13,12 @@
 # --jobs 2 that passed there, and 5 on the 24 GiB one. On a runner with no
 # cgroup limit the host's MemTotal is the limit.
 #
-# Cores are min(nproc, the cgroup CPU quota rounded up): ci-bigmem-0 has an
-# 8-CPU limit but nproc reports the host's cores. The quota comes from
+# Cores are min(nproc, the cgroup CPU quota rounded up): a container with a
+# CPU limit still sees the host's cores in nproc. The quota comes from
 # cpu.max on cgroup v2 ("<quota> <period>" or "max <period>") or
-# cpu.cfs_quota_us / cpu.cfs_period_us on v1 (-1 = none). So 24 GiB / 8 CPU
-# gives 5, 24 GiB / 14 cores 5, 10 GiB 2 (integration 1).
+# cpu.cfs_quota_us / cpu.cfs_period_us on v1 (-1 = none). So 24 GiB / 14 cores
+# (nodef-gha-public-rust) gives 5, 10 GiB (nodef-gha-public-docker) 2,
+# integration 1, and 10 GiB with a 1-CPU quota 1.
 #
 # FORK_CI_CGROUP_ROOT, FORK_CI_MEMINFO and FORK_CI_NPROC override the
 # inputs for fork-ci-build-jobs-test.sh.
