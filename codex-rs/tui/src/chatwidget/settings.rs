@@ -6,25 +6,41 @@ use crate::chatwidget::rate_limits::RATE_LIMIT_SWITCH_PROMPT_VIEW_ID;
 
 impl ChatWidget {
     pub(crate) fn set_daybreak_enabled(&mut self, enabled: bool) {
-        self.daybreak_enabled = enabled && self.config.features.enabled(Feature::CliDaybreak);
+        self.daybreak_enabled = enabled && self.daybreak_feature_enabled();
         self.bottom_pane
             .set_daybreak_command_description(self.daybreak_command_description());
     }
 
-    /// UI eligibility only; the catalog and server still determine model/program access.
-    pub(crate) fn daybreak_account_eligible(&self) -> bool {
+    fn daybreak_feature_enabled(&self) -> bool {
+        // Preserve a resumed preference while account state is still unknown. Once an API-key
+        // account is known, both flags must be enabled before using that preference.
         self.config.features.enabled(Feature::CliDaybreak)
-            && self.config.model_provider_id == "openai"
+            && (self.has_chatgpt_account
+                || !matches!(
+                    self.status_account_display,
+                    Some(StatusAccountDisplay::ApiKey)
+                )
+                || self
+                    .config
+                    .features
+                    .enabled(Feature::ApiKeyCyberAccessPrograms))
+    }
+
+    /// UI and turn-selection eligibility; the catalog and server still determine program access.
+    pub(crate) fn daybreak_account_eligible(&self) -> bool {
+        self.daybreak_feature_enabled()
+            && self
+                .config
+                .model_providers
+                .get(&self.config.model_provider_id)
+                .is_some_and(|provider| {
+                    provider.supports_cyber_access_programs(&self.config.model_provider_id)
+                })
             && (self.has_chatgpt_account
                 || matches!(
                     self.status_account_display,
                     Some(StatusAccountDisplay::ApiKey)
                 ))
-    }
-
-    /// API-key turns need no explicit program while Daybreak is off.
-    pub(crate) fn daybreak_turn_eligible(&self, enabled: bool) -> bool {
-        self.daybreak_account_eligible() && (self.has_chatgpt_account || enabled)
     }
 
     pub(super) fn daybreak_command_description(&self) -> Option<&'static str> {
@@ -112,16 +128,16 @@ impl ChatWidget {
             );
         }
         let enabled = self.config.features.enabled(feature);
-        if feature == Feature::CliDaybreak {
+        if matches!(
+            feature,
+            Feature::CliDaybreak | Feature::ApiKeyCyberAccessPrograms
+        ) {
             self.set_daybreak_enabled(self.daybreak_enabled);
             self.refresh_status_surfaces();
         }
         if matches!(feature, Feature::FastMode | Feature::UltrafastMode) {
             self.refresh_effective_service_tier();
-            self.sync_service_tier_commands();
-        }
-        if feature == Feature::Worktrees {
-            self.sync_worktrees_enabled();
+            self.refresh_model_dependent_surfaces();
         }
         if feature == Feature::Plugins {
             self.sync_plugins_command_enabled();
@@ -136,21 +152,6 @@ impl ChatWidget {
                 self.turn_lifecycle.budget_limited_turn_ids.clear();
                 self.update_collaboration_mode_indicator();
             }
-        }
-        if feature == Feature::RealtimeConversation && !enabled {
-            self.realtime_conversation_available_for_thread = false;
-            self.bottom_pane
-                .set_voice_command_enabled(/*enabled*/ false);
-            self.stop_realtime_conversation();
-        }
-        if feature == Feature::RealtimeConversation
-            && enabled
-            && !self.realtime_conversation_available_for_thread
-        {
-            self.add_info_message(
-                "Voice conversations will be available in new threads.".into(),
-                /*hint*/ None,
-            );
         }
         if feature == Feature::MentionsV2 {
             self.sync_mentions_v2_enabled();
@@ -218,10 +219,17 @@ impl ChatWidget {
         self.model_catalog.clone()
     }
 
-    pub(crate) fn on_account_email_loaded(&mut self, current_email: Option<String>) {
-        if let Some(StatusAccountDisplay::ChatGpt { email, .. }) = &mut self.status_account_display
+    pub(crate) fn on_account_email_loaded(
+        &mut self,
+        current_email: Option<String>,
+        current_workspace: Option<String>,
+    ) {
+        if let Some(StatusAccountDisplay::ChatGpt {
+            email, workspace, ..
+        }) = &mut self.status_account_display
         {
             *email = current_email;
+            *workspace = current_workspace;
         }
     }
 
@@ -247,6 +255,8 @@ impl ChatWidget {
         // Account-update notifications are the identity boundary. The visible account fields can
         // be identical across two accounts, so always invalidate account-scoped requests and data.
         self.model_popup_request_id = None;
+        let api_key_changed = self.status_account_display == Some(StatusAccountDisplay::ApiKey)
+            || status_account_display == Some(StatusAccountDisplay::ApiKey);
         self.invalidate_permission_discovery();
         self.permission_discovery = None;
         self.invalidate_connector_scope();
@@ -279,6 +289,9 @@ impl ChatWidget {
         self.status_account_display = status_account_display;
         self.plan_type = plan_type;
         self.has_chatgpt_account = has_chatgpt_account;
+        if api_key_changed {
+            self.refresh_account_scoped_models();
+        }
         self.set_daybreak_enabled(self.daybreak_enabled);
         self.has_codex_backend_auth = has_codex_backend_auth;
         self.bottom_pane
@@ -291,12 +304,14 @@ impl ChatWidget {
 
     /// Set the syntax theme override in the widget's config copy.
     pub(crate) fn set_tui_theme(&mut self, theme: Option<String>) {
+        self.config_panel_tui.theme.clone_from(&theme);
         self.local_settings.tui.theme = theme;
     }
 
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
         if model != self.current_model() {
+            self.queue_unavailable_daybreak_disable(model);
             if self.current_model() == crate::model_catalog::LUNA_RESERVE_MODEL {
                 self.clear_reserve_return();
             } else {
@@ -318,6 +333,26 @@ impl ChatWidget {
         self.refresh_model_dependent_surfaces();
     }
 
+    pub(super) fn queue_unavailable_daybreak_disable(&self, model: &str) {
+        if let Some(thread_id) = self.thread_id
+            && self.should_disable_daybreak(model)
+        {
+            self.app_event_tx
+                .send(AppEvent::DisableUnavailableDaybreak {
+                    thread_id,
+                    model: model.to_owned(),
+                });
+        }
+    }
+
+    pub(crate) fn should_disable_daybreak(&self, model: &str) -> bool {
+        self.daybreak_enabled
+            && self.model_catalog.models.iter().any(|entry| {
+                entry.model == model
+                    && crate::daybreak::availability(std::slice::from_ref(entry)) == Some(false)
+            })
+    }
+
     pub(crate) fn current_model(&self) -> &str {
         if !self.collaboration_modes_enabled() {
             return self.current_collaboration_mode.model();
@@ -334,9 +369,8 @@ impl ChatWidget {
     }
 
     pub(super) fn sync_worktrees_enabled(&mut self) {
-        self.bottom_pane.set_worktrees_enabled(
-            self.config.features.enabled(Feature::Worktrees) && self.local_worktree_operations,
-        );
+        self.bottom_pane
+            .set_worktrees_enabled(self.local_worktree_operations);
     }
 
     pub(super) fn sync_plugins_command_enabled(&mut self) {
@@ -497,6 +531,7 @@ impl ChatWidget {
         let cwd_changed = self.config.cwd != settings.cwd;
         self.apply_thread_settings_cwd(settings.cwd.clone());
         self.config.model_provider_id = settings.model_provider.clone();
+        self.set_daybreak_enabled(self.daybreak_enabled);
         self.set_service_tier(settings.service_tier.clone());
         if let Err(err) = self
             .config
@@ -536,6 +571,9 @@ impl ChatWidget {
             }
         }
 
+        if self.current_model() != settings.model {
+            self.queue_unavailable_daybreak_disable(&settings.model);
+        }
         settings.collaboration_mode.settings.model = settings.model;
         settings.collaboration_mode.settings.reasoning_effort = settings.effort;
         self.set_effective_collaboration_mode(settings.collaboration_mode);
@@ -724,6 +762,9 @@ impl ChatWidget {
         }
         self.active_collaboration_mask = Some(mask);
         self.update_collaboration_mode_indicator();
+        if previous_model != self.current_model() {
+            self.queue_unavailable_daybreak_disable(self.current_model());
+        }
         self.refresh_model_dependent_surfaces();
         let next_mode = self.active_mode_kind();
         let next_model = self.current_model();

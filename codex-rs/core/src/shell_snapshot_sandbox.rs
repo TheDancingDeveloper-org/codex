@@ -164,6 +164,7 @@ impl ShellSnapshotSandbox {
                     additional_permissions,
                 },
                 permissions: &self.permissions,
+                workspace_roots: None,
                 sandbox: self.sandbox,
                 enforce_managed_network: self.enforce_managed_network,
                 environment_id: Some(&self.environment_id),
@@ -173,7 +174,8 @@ impl ShellSnapshotSandbox {
                 use_legacy_landlock: self.use_legacy_landlock,
                 windows_sandbox_level: self.windows_sandbox_level,
             })
-            .context("failed to prepare shell snapshot sandbox")?;
+            .context("failed to prepare shell snapshot sandbox")?
+            .into_command_request();
         let workspace_roots = self
             .workspace_roots
             .iter()
@@ -197,6 +199,7 @@ impl ShellSnapshotSandbox {
             },
             workspace_roots,
         )
+        .await
         .context("failed to prepare shell snapshot execution")?;
         // Caller cancellation must leave execution alive long enough to clean up its process group.
         let output = tokio::spawn(execute_env(request, /*stdout_stream*/ None))

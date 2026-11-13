@@ -5,11 +5,16 @@ one per line, on argv. A file belongs to the package whose manifest directory
 is the longest prefix of its path, so a nested crate wins over its parent and
 the directory name never has to equal the package name.
 
-A change to a member's Cargo.toml also selects the workspace packages that
-depend on it, directly or transitively (reverse dependencies). A change to the
-workspace Cargo.toml selects every package. Cargo.lock is not handled here:
-the caller compares the resolve graph and passes the affected members as
-ordinary paths, or prints them itself.
+A member's Cargo.toml is a file of that member like any other: it selects the
+member and nothing else. It used to select the member's reverse dependencies
+too, but a fork-owned manifest hunk is a dependency the fork's patch added
+(codex-home gained dirs and sha2), and codex-home's dependents are the whole
+workspace, which is what the selection exists to avoid (WI-4161). Dependents
+compile against the same API either way; a fork patch that changes an API is a
+change to .rs files, and dependents the fork itself edits are selected by
+those edits. A change to the workspace Cargo.toml selects every package.
+Cargo.lock is not handled here: the caller compares the resolve graph and
+passes the affected members as ordinary paths, or prints them itself.
 """
 
 import json
@@ -50,46 +55,13 @@ def owner_of(path, dirs):
     return None
 
 
-def reverse_closure(meta, names):
-    """Workspace members that depend on `names`, directly or transitively.
-
-    The selection step runs `cargo metadata --no-deps`, whose `resolve` is null,
-    so the only edges available are the declared requirements. A declared
-    dependency names a workspace member when it has a `path` or its `name` is
-    itself a member; registry requirements match neither.
-    """
-    members = set(meta.get("workspace_members", []))
-    member_names = {
-        package["name"]
-        for package in meta["packages"]
-        if package["id"] in members
-    }
-    # name -> packages in the workspace that list it as a normal/dev/build dep
-    dependents = {}
-    for package in meta["packages"]:
-        if package["id"] not in members:
-            continue
-        for dep in package.get("dependencies", []):
-            dep_name = dep.get("name")
-            if dep.get("path") or dep_name in member_names:
-                dependents.setdefault(dep_name, set()).add(package["name"])
-    selected = set(names)
-    frontier = list(names)
-    while frontier:
-        name = frontier.pop()
-        for dependent in dependents.get(name, ()):
-            if dependent not in selected:
-                selected.add(dependent)
-                frontier.append(dependent)
-    return selected
-
 
 def select(meta, paths, root=None):
     """Return workspace package names selected by `paths`, in first-seen order.
 
     `paths` are repo-relative. The workspace Cargo.toml selects everything.
-    A member Cargo.toml selects that member and its reverse dependencies.
-    Any other file selects only its owning package.
+    Any other file, a member's Cargo.toml included, selects only its owning
+    package.
     """
     root = root or os.getcwd()
     dirs = package_dirs(meta, root)
@@ -97,40 +69,18 @@ def select(meta, paths, root=None):
     for package in meta["packages"]:
         if package["id"] in set(meta.get("workspace_members", [])):
             member_names.append(package["name"])
-    manifest_dir = {}
-    for package in meta["packages"]:
-        manifest = package["manifest_path"]
-        if os.path.isabs(manifest):
-            manifest = os.path.relpath(manifest, root)
-        manifest = strip_workspace_prefix(manifest)
-        manifest_dir[package["name"]] = os.path.dirname(manifest)
-
     seen = []
 
     def add(name):
         if name and name not in seen:
             seen.append(name)
 
-    manifest_hits = []
     for argument in paths:
         path = os.path.normpath(argument)
         stripped = strip_workspace_prefix(path)
         if stripped in ("Cargo.toml", "./Cargo.toml"):
             return member_names
-        owner = owner_of(path, dirs)
-        if owner is None:
-            continue
-        if os.path.basename(stripped) == "Cargo.toml" and manifest_dir.get(owner) == os.path.dirname(stripped):
-            manifest_hits.append(owner)
-        else:
-            add(owner)
-    if manifest_hits:
-        closure = reverse_closure(meta, manifest_hits)
-        for name in member_names:
-            if name in closure:
-                add(name)
-        for name in manifest_hits:
-            add(name)
+        add(owner_of(path, dirs))
     return seen
 
 

@@ -110,7 +110,7 @@ jobs:
           # The fork base is the upstream stable tag; recorded in FORK.md and
           # advanced by the rebase procedure. `git describe` cannot be used:
           # upstream tags are not fetched into this checkout.
-          upstream_version="0.162.0"
+          upstream_version="0.167.0"
           stamp="${upstream_version}+fork.${GITHUB_SHA:0:9}"
           # The workspace version is the upstream version (WI-1127), so match that
           # line. Matching a literal 0.0.0 matched nothing and the stamp was

@@ -46,6 +46,7 @@ pub fn spawn_chat_stream(
         telemetry,
     ));
     ResponseStream {
+        routing_affinity: None,
         rx_event,
         upstream_request_id,
         interrupt: None,
@@ -174,6 +175,8 @@ impl ChatAccumulator {
                 call.arguments
             };
             events.push(ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 name: call.name,
                 namespace: None,
@@ -195,9 +198,15 @@ impl ChatAccumulator {
 
 fn assistant_message(text: String) -> ResponseItem {
     ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
         id: None,
         role: "assistant".to_string(),
-        content: vec![ContentItem::OutputText { text }],
+        content: vec![ContentItem::OutputText {
+            text,
+            annotations: None,
+            logprobs: None,
+        }],
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
