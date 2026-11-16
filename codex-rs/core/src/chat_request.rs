@@ -81,6 +81,7 @@ impl ChatToolMap {
         };
         if tool.freeform {
             return ResponseItem::CustomToolCall {
+                encrypted_content: None,
                 id: id.clone(),
                 status: None,
                 call_id: call_id.clone(),
@@ -91,6 +92,8 @@ impl ChatToolMap {
             };
         }
         ResponseItem::FunctionCall {
+            encrypted_content: None,
+            status: None,
             id: id.clone(),
             name: tool.name.clone(),
             namespace: tool.namespace.clone(),
@@ -248,7 +251,7 @@ fn message_content(content: &[ContentItem]) -> String {
     content
         .iter()
         .filter_map(|item| match item {
-            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+            ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
                 Some(text.as_str())
             }
             ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => None,

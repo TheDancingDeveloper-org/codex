@@ -2173,17 +2173,14 @@ impl ModelClientSession {
             .current_client_setup(ClientRouting::Workspace)
             .await?;
         tracing::Span::current().record("api.path", "/chat/completions");
-        let transport = self.client.build_api_transport(
-            &client_setup.api_provider,
-            "/chat/completions",
-            client_setup.redirect_policy,
-        )?;
+        let transport = client_setup.http_transport("/chat/completions")?;
         let request_auth_context = AuthRequestTelemetryContext::new(
             client_setup.auth.as_ref().map(CodexAuth::auth_mode),
             client_setup.api_auth.as_ref(),
             client_setup.agent_identity_telemetry.clone(),
             PendingUnauthorizedRetry::default(),
-        );
+        )
+        .map_err(|error| self.client.state.provider.map_api_error(error))?;
         let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
             session_telemetry,
             request_auth_context,
@@ -2221,12 +2218,13 @@ impl ModelClientSession {
                 }
             }
         });
-        let (stream, _) = map_response_stream(
+        let stream = map_response_stream(
             api_stream,
             session_telemetry.clone(),
             inference_trace_attempt,
-            Arc::clone(&self.client.state.provider),
+            &self.client.state,
             interceptors,
+            /*last_response_tx*/ None,
         );
         Ok(stream)
     }

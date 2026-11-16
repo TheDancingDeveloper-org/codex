@@ -152,11 +152,21 @@ impl CoreToolRuntime for WriteStdinHandler {
         }
         // The directory the shell was started in, not its current directory: a
         // `cd` typed into the shell is not tracked. Null when the process is gone.
-        let workdir = invocation
-            .session
-            .services
-            .unified_exec_manager
-            .start_cwd_for_process(args.session_id)
+        #[derive(serde::Deserialize)]
+        struct SessionIdArg {
+            session_id: i32,
+        }
+        let session_id = parse_arguments::<SessionIdArg>(arguments)
+            .ok()
+            .map(|arg| arg.session_id);
+        let workdir = session_id
+            .and_then(|session_id| {
+                invocation
+                    .session
+                    .services
+                    .unified_exec_manager
+                    .start_cwd_for_process(session_id)
+            })
             .map(|cwd| serde_json::Value::String(cwd.to_string()))
             .unwrap_or(serde_json::Value::Null);
         Some(PreToolUsePayload {
