@@ -55,17 +55,12 @@ Settings:
         A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list ...ed into an absolute path using the skill roots table. [hash=ca27c3957f42502b]
         ### Skill roots
         - `r0` = `<SKILLS_ROOT>`
-        - `r1` = `<SKILLS_ROOT>`
-        - `r2` = `<PLUGINS_CACHE>/test`
+        - `r1` = `<PLUGINS_CACHE>/test`
         ### Available skills
-        <OMITTED 51 LINES; ~4805 TOKENS; hash=874de29447fe8938>
-        - upright-ssh: SSH access to upright — the Ubuntu VPS (hostname `UnionSprooty1`) that hosts farmeggs, fu...pright`, not sprooty. (file: r1/upright-ssh/SKILL.md) [hash=b6d0a1fd19f89080]
-        - vogt-backlog: Raise and shape a backlog in Vogt (the estate work tracker) from a session — initiatives...ecord findings, defe (file: r1/vogt-backlog/SKILL.md) [hash=667c3d2fbc46973e]
-        - vogt-estate-deploy: Deploy Vogt to the estate's vogt-dev or vogt-prod stack through the estate Woodpec...od, known fail (file: r1/vogt-estate-deploy/SKILL.md) [hash=77f099f8978a3e1b]
-        - windows-ssh: SSH into the Windows dev box desktop-tlk1gff (100.109.218.11) — key delivery under the br...ng at 100.109.218.11. (file: r1/windows-ssh/SKILL.md) [hash=e638b49b818ba86b]
-        - woodpecker: Drive the estate's Woodpecker CI (ci.indexarr.net) with the `wp` tool — trigger the vogt-e...rl + base64 + polling. (file: r1/woodpecker/SKILL.md) [hash=ea0de9557361eb67]
-        - worker-brief: Templates for the brief oversight gives a worker session — an implement brief (one work ...t or review session. (file: r1/worker-brief/SKILL.md) [hash=b6829dbe06e95d01]
-        - workspace-basics: Apply portable workspace safety and verification conventions. (file: r1/workspace-basics/SKILL.md)
+        - calendar:agenda: Plan a team agenda (file: r1/calendar/local/skills/agenda/SKILL.md)
+        - final-check: Review a final brief (file: r0/final-check/SKILL.md)
+        - notes:summarize: Summarize team notes (file: r1/notes/local/skills/summarize/SKILL.md)
+        - outline: Draft a project outline (file: r0/outline/SKILL.md)
         </skills_instructions>
     [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
@@ -234,17 +229,12 @@ Settings: same as window 1
         A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list ...ed into an absolute path using the skill roots table. [hash=ca27c3957f42502b]
         ### Skill roots
         - `r0` = `<SKILLS_ROOT>`
-        - `r1` = `<SKILLS_ROOT>`
-        - `r2` = `<PLUGINS_CACHE>/test`
+        - `r1` = `<PLUGINS_CACHE>/test`
         ### Available skills
-        <OMITTED 51 LINES; ~4805 TOKENS; hash=874de29447fe8938>
-        - upright-ssh: SSH access to upright — the Ubuntu VPS (hostname `UnionSprooty1`) that hosts farmeggs, fu...pright`, not sprooty. (file: r1/upright-ssh/SKILL.md) [hash=b6d0a1fd19f89080]
-        - vogt-backlog: Raise and shape a backlog in Vogt (the estate work tracker) from a session — initiatives...ecord findings, defe (file: r1/vogt-backlog/SKILL.md) [hash=667c3d2fbc46973e]
-        - vogt-estate-deploy: Deploy Vogt to the estate's vogt-dev or vogt-prod stack through the estate Woodpec...od, known fail (file: r1/vogt-estate-deploy/SKILL.md) [hash=77f099f8978a3e1b]
-        - windows-ssh: SSH into the Windows dev box desktop-tlk1gff (100.109.218.11) — key delivery under the br...ng at 100.109.218.11. (file: r1/windows-ssh/SKILL.md) [hash=e638b49b818ba86b]
-        - woodpecker: Drive the estate's Woodpecker CI (ci.indexarr.net) with the `wp` tool — trigger the vogt-e...rl + base64 + polling. (file: r1/woodpecker/SKILL.md) [hash=ea0de9557361eb67]
-        - worker-brief: Templates for the brief oversight gives a worker session — an implement brief (one work ...t or review session. (file: r1/worker-brief/SKILL.md) [hash=b6829dbe06e95d01]
-        - workspace-basics: Apply portable workspace safety and verification conventions. (file: r1/workspace-basics/SKILL.md)
+        - calendar:agenda: Plan a team agenda (file: r1/calendar/local/skills/agenda/SKILL.md)
+        - final-check: Review a final brief (file: r0/final-check/SKILL.md)
+        - notes:summarize: Summarize team notes (file: r1/notes/local/skills/summarize/SKILL.md)
+        - outline: Draft a project outline (file: r0/outline/SKILL.md)
         </skills_instructions>
     [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
