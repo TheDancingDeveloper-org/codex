@@ -61,10 +61,53 @@ passing on its own is enough: a cherry-pick does not move the base.
 | — | `agent-state` terminal title item (`codex: ready\|working\|awaiting approval`), written only on change, with the user's title pushed (`CSI 22;0t`) at the first title write and popped (`CSI 23;0t`) on exit. Idle with `animations = false` schedules no refresh. Landed on `fork/wi-1127-agent-state` at `b5f9b014`. | fork-only; Klaudia contract from vogt `internal/tui/idle.go` |
 | — | `wire_api = "chat"`: Chat Completions client restored for providers whose Responses path drops tool calls (grok via theclawbay/LiteLLM, WI-1139). New files only, plus one dispatch arm: `core/src/chat_request.rs` (request conversion; namespaced tools flattened to `ns__name`, freeform tools such as apply_patch exposed as a function taking one `input` string, calls restored by `ChatToolMap`), `codex-api/src/{endpoint,sse}/chat.rs` (client and SSE parser, fixture tests in `sse/chat_tests.rs`). Reasoning, web search and tool search are not sent over chat. Branch `fork/wi-1286-chat-wire`. | fork-only; upstream removed the chat client |
 | — | Headless MCP startup (issue #26, WI-1514): `codex exec` defaults `mcp_optional_startup_grace_ms` to 0 unless set, so every enabled server's startup is awaited (each bounded by its `startup_timeout_sec`) before the first request; a failed or timed-out server is printed as a warning and the run continues. Tool dispatch resolves un-namespaced `mcp__<server>__<tool>` names and bare names unique across MCP servers, and answers a call to a server still handshaking with "MCP server `x` is still starting" instead of "unsupported call". `exec/src/lib.rs`, `core/src/tools/registry.rs`, `codex-mcp` `pending_startup_servers`. Branch `fix/issue-26-mcp-startup`. | fork-only |
-| — | Per-handler hook `failClosed` and `write_stdin` review input. `HookHandlerConfig` now lives in `protocol/src/hooks.rs`; `write_stdin` has no `session_id` in its args, so it is parsed locally. WI-4323 rebase. | fork-only |
+| — | Per-handler hook `failClosed` (omitted from serialization when false, so the hook identity hash and existing trust approvals of handlers that do not set it are unchanged; fork/main c6d8d792af) and `write_stdin` review input. `HookHandlerConfig` now lives in `protocol/src/hooks.rs`; `write_stdin` has no `session_id` in its args, so it is parsed locally. WI-4323 rebase. | fork-only |
 | — | `spawn_agent` `output_schema`: `ThreadSpawnRequest.output_schema` feeds `SpawnAgentOptions.final_output_json_schema` (v2 spawns go through `thread_spawn`). | fork-only |
 | — | Caller-chosen thread id on thread start, and `exec --session-id` kept off the resume and fork positionals. | fork-only |
 | — | Configurable `[skills]` extra roots, Claude-compat global instructions, `project_doc_mode` and confined `@import` expansion (`ext/skills/src/host_roots.rs`, `core/src/agents_md.rs`). | fork-only |
+| — | Model search discovery stays stable when Apps finishes starting up mid-turn: `shares_model_search_source` replaces the `Arc::ptr_eq` base check (`core/src/model_search.rs`, `codex-mcp/src/model_search.rs`; WI-4137; fork/main f23f8fd2b8). Re-carried after the first rebase attempt dropped it. | fork-only; not fixed in 0.169 |
+| — | `codex doctor` accepts the `agent-state` title item (`cli/src/doctor/title.rs`; fork/main b9e7e0ddec). | fork-only, goes with the agent-state patch |
+
+### Dropped or reworked in the 0.169.0 rebase (WI-4323)
+
+Every `fork/main` 5c4381bb commit after the merge base `6dfaca4dad` is either
+carried above, reworked, or dropped here.
+
+Dropped, superseded by upstream 0.169.0:
+
+- `3e2cb8584e` and `b7f4b598d7` (resolved workdir in the exec_command
+  PreToolUse payload) and `674c84189c` (non-blocking start-cwd lookup).
+  Upstream now sends the resolved directory as the hook's `cwd`
+  (`pre_tool_use_cwd`), for local environments only. `tool_input.workdir` is
+  no longer in the payload; nothing in vogt reads it.
+- `a0a515ba17` (hermetic repo-ancestry test): fixed upstream.
+- `a19cabb2ba` (#52648), `88286d41c3` (#51866): the 0.162.1 cherry-picks, in
+  0.169.0.
+- `a028250541` (#51812), `f86cffa3a7`, `c1382380de`: upstream commits that
+  arrived through earlier merges; in 0.169.0.
+
+Reworked for 0.169.0 internals (same behaviour, new shapes):
+
+- `wire_api = "chat"` (new `http_transport` / `map_response_stream` API,
+  `ResponseItem`/`ContentItem`/`Prompt` shapes).
+- failClosed (`HookHandlerConfig` moved to `protocol/src/hooks.rs`) and the
+  `write_stdin` hook input (parsed locally; no `session_id` in its args).
+- `spawn_agent` `output_schema` (v2 goes through `thread_spawn`).
+- Headless MCP startup (`exec/src/lib.rs` mutability fix).
+- Skills extra roots and `agents_md` (re-done by hand).
+- The scenario snapshots `7d861cdae2`, `7bcbbc47c5`: re-taken in a clean HOME;
+  only the spawn_agent hash lines differ from upstream.
+- `1e672adbfc`, `ec939d3d89` (exec override binding and its rustfmt): folded
+  into the exec rework.
+- `.github/`: fork-added files restored from fork/main 5c4381bb unchanged
+  (`fork-ci.yml`, `fork-release.yml`, `fork-ci-*.sh`,
+  `fork-ci-known-failures.txt`, `fork-changed-packages.py`, ...). The only
+  edit is the `fork-release.yml` `upstream_version` stamp, now `0.169.0`.
+  The fork-ci and quarantine commits (`30459fcdbc`, `82998424d8`, `31270db240`,
+  `5316cb6e2e`, `8c54367b27`, `de93ab34e8`, `9d0846847a`, `49ace6eff7`,
+  `1a91dee43f`, `8475fceee3`, `870a01b41e`, `a4c2fdd846`, `df176b49ef`,
+  `9effa42ce5`, `53cda7fb47`, `700da378d3`, `f89b8a6920`, `c256821418`) come
+  back with that restore.
 
 ## External adapters
 
