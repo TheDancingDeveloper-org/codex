@@ -1083,9 +1083,9 @@ async fn extra_project_roots_are_added_and_confined() {
         /*empty_remote_roots*/ None,
     )
     .await
-        .into_iter()
-        .map(|root| root.path)
-        .collect::<Vec<_>>();
+    .into_iter()
+    .map(|root| root.path)
+    .collect::<Vec<_>>();
 
     assert!(roots.contains(&repository.join(".agents/skills")));
     assert!(roots.contains(&repository.join(".claude/skills")));

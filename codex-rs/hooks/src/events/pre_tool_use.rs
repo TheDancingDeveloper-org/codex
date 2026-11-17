@@ -357,8 +357,8 @@ mod tests {
 
     use super::PreToolUseHandlerData;
     use super::command_input;
-    use super::latest_updated_input;
     use super::dispatcher;
+    use super::latest_updated_input;
     use super::parse_completed;
     use super::preview;
     use crate::engine::ConfiguredHandler;
