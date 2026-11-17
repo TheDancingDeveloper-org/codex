@@ -13,19 +13,13 @@ core edits.
 - `main` is a pure mirror of upstream `main`. Nothing fork-specific is ever
   committed to it, and it is never the base of a fork pull request.
 - `fork/main` is the fork line: an upstream stable tag plus the carried patch
-  series. It currently sits on `c1382380d`, the commit of upstream tag
-  `rust-v0.162.0`.
-- Upstream fixes taken through: rust-v0.162.1
-  This line is separate from the rebase base above. It records fixes taken by
-  cherry-pick, which does not move `fork/main`, because published `fork-<sha>`
-  tags must stay reachable. The two fix commits are `f715d50688` (daemon
-  feature compatibility checks only on explicit CLI overrides, #52648) and
-  `1a1335eefe` (multiline async questions keep line breaks and links, #51866).
-  The tag commit `092d3acd6b` is not taken: it only bumps the workspace version
-  to `0.162.1`, and the fork keeps its `0.162.0` stamp. Branch
-  `fork/wi-1125-upstream-0-162-1`. The tag lives on a release branch, not on
-  upstream `main`: `2351d9e1b` (upstream `main` at fork time) is 114 commits
-  away and not descended from the tag, so it is not a valid base.
+  series. The rebase onto upstream tag `rust-v0.169.0` (`d32063f96c`) is
+  branch `wi-4323-rebase-0.169.0` (WI-4323); `fork/main` moves there once it
+  is force-pushed with a lease and released.
+- Upstream fixes taken through: rust-v0.169.0
+  The 0.162.1 cherry-picks (#52648, #51866) are in 0.169.0 and were dropped
+  from the carried series by the rebase. The base and this marker are now the
+  same tag.
 - All fork work branches off `fork/main` and every fork pull request targets
   `fork/main`. Never open, comment on, or push anything to openai/codex.
 - Vogt pins `fork/main` commit SHAs, not tags and not `main`.
@@ -67,6 +61,10 @@ passing on its own is enough: a cherry-pick does not move the base.
 | — | `agent-state` terminal title item (`codex: ready\|working\|awaiting approval`), written only on change, with the user's title pushed (`CSI 22;0t`) at the first title write and popped (`CSI 23;0t`) on exit. Idle with `animations = false` schedules no refresh. Landed on `fork/wi-1127-agent-state` at `b5f9b014`. | fork-only; Klaudia contract from vogt `internal/tui/idle.go` |
 | — | `wire_api = "chat"`: Chat Completions client restored for providers whose Responses path drops tool calls (grok via theclawbay/LiteLLM, WI-1139). New files only, plus one dispatch arm: `core/src/chat_request.rs` (request conversion; namespaced tools flattened to `ns__name`, freeform tools such as apply_patch exposed as a function taking one `input` string, calls restored by `ChatToolMap`), `codex-api/src/{endpoint,sse}/chat.rs` (client and SSE parser, fixture tests in `sse/chat_tests.rs`). Reasoning, web search and tool search are not sent over chat. Branch `fork/wi-1286-chat-wire`. | fork-only; upstream removed the chat client |
 | — | Headless MCP startup (issue #26, WI-1514): `codex exec` defaults `mcp_optional_startup_grace_ms` to 0 unless set, so every enabled server's startup is awaited (each bounded by its `startup_timeout_sec`) before the first request; a failed or timed-out server is printed as a warning and the run continues. Tool dispatch resolves un-namespaced `mcp__<server>__<tool>` names and bare names unique across MCP servers, and answers a call to a server still handshaking with "MCP server `x` is still starting" instead of "unsupported call". `exec/src/lib.rs`, `core/src/tools/registry.rs`, `codex-mcp` `pending_startup_servers`. Branch `fix/issue-26-mcp-startup`. | fork-only |
+| — | Per-handler hook `failClosed` and `write_stdin` review input. `HookHandlerConfig` now lives in `protocol/src/hooks.rs`; `write_stdin` has no `session_id` in its args, so it is parsed locally. WI-4323 rebase. | fork-only |
+| — | `spawn_agent` `output_schema`: `ThreadSpawnRequest.output_schema` feeds `SpawnAgentOptions.final_output_json_schema` (v2 spawns go through `thread_spawn`). | fork-only |
+| — | Caller-chosen thread id on thread start, and `exec --session-id` kept off the resume and fork positionals. | fork-only |
+| — | Configurable `[skills]` extra roots, Claude-compat global instructions, `project_doc_mode` and confined `@import` expansion (`ext/skills/src/host_roots.rs`, `core/src/agents_md.rs`). | fork-only |
 
 ## External adapters
 
