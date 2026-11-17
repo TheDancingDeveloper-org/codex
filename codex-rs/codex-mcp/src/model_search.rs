@@ -42,24 +42,62 @@ impl McpBinding {
         invocation_context(&scoped.tool_info().tool)
     }
 
-    /// A catalog omission, policy denial, or untrusted registration never authorizes fallback.
-    pub async fn discover_model_search(&self, turn_metadata: JsonValue) -> SearchDiscovery {
-        let Some((index, original)) = self
+    fn model_search_entry(&self) -> Option<(usize, &crate::ToolInfo, &crate::PreparedMcpCall)> {
+        let (index, original) = self
             .tools
             .iter()
             .enumerate()
-            .find(|(_, tool)| is_model_search_tool(tool))
-        else {
+            .find(|(_, tool)| is_model_search_tool(tool))?;
+        let call = self
+            .calls
+            .get(&(original.server_name.clone(), original.tool.name.to_string()))
+            .filter(|call| call.is_host_owned_apps())?;
+        Some((index, original, call))
+    }
+
+    /// Whether discovery against `previous` still describes this binding: the same Apps
+    /// transport serves an unchanged search tool. Unrelated catalog churn keeps it valid.
+    pub fn shares_model_search_source(&self, previous: &McpBinding) -> bool {
+        match (self.model_search_entry(), previous.model_search_entry()) {
+            (Some((_, tool, call)), Some((_, previous_tool, previous_call))) => {
+                tool == previous_tool
+                    && Arc::ptr_eq(&call.client.client, &previous_call.client.client)
+            }
+            _ => false,
+        }
+    }
+
+    /// Apply a turn's discovered search projection to this binding. Callers must first check
+    /// `shares_model_search_source` against the binding that discovery ran on.
+    pub fn rebase_model_search(&self, discovered: &McpBinding) -> Option<Arc<McpBinding>> {
+        let (index, original, call) = self.model_search_entry()?;
+        let key = (original.server_name.clone(), original.tool.name.to_string());
+        let projected = discovered.calls.get(&key)?;
+        if !Arc::ptr_eq(&projected.client.client, &call.client.client) {
+            return None;
+        }
+        let mut tools = self.tools.to_vec();
+        tools[index] = projected.tool_info().clone();
+        let mut calls = self.calls.clone();
+        let mut call = call.clone();
+        call.tool_info = projected.tool_info().clone().into();
+        calls.insert(key, call);
+        Some(Arc::new(Self::new(
+            Arc::clone(&self.connections),
+            Arc::clone(&self.clients),
+            Arc::clone(&self.config),
+            self.plugins_available,
+            tools,
+            calls,
+        )))
+    }
+
+    /// A catalog omission, policy denial, or untrusted registration never authorizes fallback.
+    pub async fn discover_model_search(&self, turn_metadata: JsonValue) -> SearchDiscovery {
+        let Some((index, original, call)) = self.model_search_entry() else {
             return SearchDiscovery::Unavailable;
         };
         let key = (original.server_name.clone(), original.tool.name.to_string());
-        let Some(call) = self
-            .calls
-            .get(&key)
-            .filter(|call| call.is_host_owned_apps())
-        else {
-            return SearchDiscovery::Unavailable;
-        };
         let meta = RequestMetaObject::from(serde_json::Map::from_iter([(
             "x-codex-turn-metadata".to_string(),
             turn_metadata,
