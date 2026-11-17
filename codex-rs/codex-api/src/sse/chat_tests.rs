@@ -34,6 +34,8 @@ fn done_items(events: &[Result<ResponseEvent, ApiError>]) -> Vec<ResponseItem> {
 
 fn call(call_id: &str, name: &str, arguments: &str) -> ResponseItem {
     ResponseItem::FunctionCall {
+        encrypted_content: None,
+        status: None,
         id: None,
         name: name.to_string(),
         namespace: None,

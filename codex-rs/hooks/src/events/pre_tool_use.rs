@@ -854,6 +854,7 @@ mod tests {
             stdout: String::new(),
             stderr: String::new(),
             error: Some(error.to_string()),
+            context_metadata: codex_protocol::models::ContentItemMetadata::harness(),
         }
     }
 

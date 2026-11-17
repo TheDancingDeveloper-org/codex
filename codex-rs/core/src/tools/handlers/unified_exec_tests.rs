@@ -623,6 +623,8 @@ async fn write_stdin_pre_tool_use_payload_skips_empty_poll() {
             tool_name: codex_tools::ToolName::plain("write_stdin"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
+            native_call: None,
+            environments: Default::default(),
         }),
         None
     );

@@ -363,12 +363,15 @@ mod tests {
     #[test]
     fn chat_request_converts_messages_tools_and_parallel_calls() {
         let prompt = Prompt {
+            prompt_cache_ttl: None,
             base_instructions: BaseInstructions {
                 text: "be brief".to_string(),
                 provenance: None,
             },
             input: vec![
                 ResponseItem::Message {
+                    encrypted_content: None,
+                    status: None,
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -378,6 +381,8 @@ mod tests {
                     internal_chat_message_metadata_passthrough: None,
                 },
                 ResponseItem::FunctionCall {
+                    encrypted_content: None,
+                    status: None,
                     id: None,
                     name: "shell".to_string(),
                     namespace: None,
@@ -387,6 +392,8 @@ mod tests {
                     internal_chat_message_metadata_passthrough: None,
                 },
                 ResponseItem::FunctionCall {
+                    encrypted_content: None,
+                    status: None,
                     id: None,
                     name: "work_get".to_string(),
                     namespace: Some("vogt".to_string()),
@@ -477,6 +484,7 @@ mod tests {
 
     fn prompt_with(input: Vec<ResponseItem>, tools: Vec<ToolSpec>) -> Prompt {
         Prompt {
+            prompt_cache_ttl: None,
             base_instructions: BaseInstructions {
                 text: String::new(),
                 provenance: None,
@@ -508,6 +516,7 @@ mod tests {
         let prompt = prompt_with(
             vec![
                 ResponseItem::CustomToolCall {
+                    encrypted_content: None,
                     id: None,
                     status: None,
                     call_id: "call-p".to_string(),
@@ -548,6 +557,8 @@ mod tests {
         );
 
         let call = |arguments: &str| ResponseItem::FunctionCall {
+            encrypted_content: None,
+            status: None,
             id: None,
             name: "apply_patch".to_string(),
             namespace: None,
@@ -557,6 +568,7 @@ mod tests {
             internal_chat_message_metadata_passthrough: None,
         };
         let expected = ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             call_id: "call-q".to_string(),
@@ -585,6 +597,8 @@ mod tests {
         let (body, map) = build_chat_request("grok", &prompt);
         assert_eq!(body["tools"][0]["function"]["name"], "mcp__vogt__work_get");
         let restored = map.restore(ResponseItem::FunctionCall {
+            encrypted_content: None,
+            status: None,
             id: None,
             name: "mcp__vogt__work_get".to_string(),
             namespace: None,
@@ -596,6 +610,8 @@ mod tests {
         assert_eq!(
             restored,
             ResponseItem::FunctionCall {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 name: "work_get".to_string(),
                 namespace: Some("mcp__vogt".to_string()),
