@@ -97,6 +97,8 @@ Reworked for 0.169.0 internals (same behaviour, new shapes):
 - Skills extra roots and `agents_md` (re-done by hand).
 - The scenario snapshots `7d861cdae2`, `7bcbbc47c5`: re-taken in a clean HOME;
   only the spawn_agent hash lines differ from upstream.
+- The schema fixtures `385bef2beb`, `cc1d1006d5`, `d42fc33c29`: regenerated on
+  0.169.0 (hook handler schema, experimental export, config schema).
 - `1e672adbfc`, `ec939d3d89` (exec override binding and its rustfmt): folded
   into the exec rework.
 - `.github/`: fork-added files restored from fork/main 5c4381bb unchanged
