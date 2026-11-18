@@ -33,6 +33,7 @@ use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::protocol::WarningEvent;
 use codex_protocol::request_user_input::RequestUserInputAnswer;
 use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_protocol::user_input::UserInput;
@@ -1760,6 +1761,10 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let token_count_used = 270_000;
     // token used count after compaction
     let token_count_used_after_compaction = 80000;
+    // a continuation that runs after a compaction reports a prompt that is
+    // genuinely under the limit: the compaction did shrink the context, and the
+    // guard must let the turn continue.
+    let token_count_after_continuation = 100_000;
 
     // mock responses from the model
 
@@ -1817,6 +1822,29 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
         ev_completed_with_tokens("r7", token_count_used_after_compaction),
     ]);
 
+    // Continuations that run immediately after a compaction. Each reports a prompt
+    // below `model_auto_compact_token_limit` (244_800 for this model), so the
+    // ineffective-compaction guard does not fire and the turn keeps going.
+    let reasoning_cont_1 = ev_reasoning_item("m2b", &["I will inspect the react app"], &[]);
+    let encrypted_content_cont_1 = reasoning_cont_1["item"]["encrypted_content"]
+        .as_str()
+        .unwrap();
+    let continuation_1_sse = sse(vec![
+        reasoning_cont_1.clone(),
+        ev_exec_command_call("r2-shell", "echo inspect-react"),
+        ev_completed_with_tokens("r2", token_count_after_continuation),
+    ]);
+
+    let reasoning_cont_2 = ev_reasoning_item("m4b", &["I will inspect the node app"], &[]);
+    let encrypted_content_cont_2 = reasoning_cont_2["item"]["encrypted_content"]
+        .as_str()
+        .unwrap();
+    let continuation_2_sse = sse(vec![
+        reasoning_cont_2.clone(),
+        ev_exec_command_call("r5-shell", "echo inspect-node"),
+        ev_completed_with_tokens("r5", token_count_after_continuation),
+    ]);
+
     // final response
     let model_final_response_sse = sse(vec![
         ev_assistant_message(
@@ -1830,8 +1858,10 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let bodies = vec![
         model_reasoning_response_1_sse,
         model_compact_response_1_sse,
+        continuation_1_sse,
         model_reasoning_response_2_sse,
         model_compact_response_2_sse,
+        continuation_2_sse,
         model_reasoning_response_3_sse,
         model_compact_response_3_sse,
         model_final_response_sse,
@@ -1909,7 +1939,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let environment_message = initial_input[0]["content"][0]["text"].as_str().unwrap();
 
     // test 1: after compaction, we should have one environment message, one user message, and one user message with summary prefix
-    let compaction_indices = [2, 4, 6];
+    let compaction_indices = [2, 5, 8];
     let expected_summaries = [
         prefixed_first_summary.as_str(),
         prefixed_second_summary.as_str(),
@@ -1933,320 +1963,434 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
 
     // test 2: the expected requests inputs should be as follows:
     let expected_requests_inputs = json!([
-    [
-        // 0: first request of the user message.
-      {
-        "content": [
-          {
-            "text": environment_message,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": "create an app",
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      }
+      // 0: initial turn.
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ],
+      // 1: first automatic compaction request.
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": null,
+          "encrypted_content": encrypted_content_1,
+          "summary": [
+            {
+              "text": "I will create a react app",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"cmd\":\"echo make-react\"}",
+          "call_id": "r1-shell",
+          "name": "exec_command",
+          "type": "function_call"
+        },
+        {
+          "content": [
+            {
+              "text": SUMMARIZATION_PROMPT,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ],
+      // 2: request after the first automatic compaction (under-limit continuation).
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": prefixed_first_summary.clone(),
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ],
+      // 3: second chunk of work.
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": prefixed_first_summary.clone(),
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": null,
+          "encrypted_content": encrypted_content_cont_1,
+          "summary": [
+            {
+              "text": "I will inspect the react app",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"cmd\":\"echo inspect-react\"}",
+          "call_id": "r2-shell",
+          "name": "exec_command",
+          "type": "function_call"
+        }
+      ],
+      // 4: second automatic compaction request.
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": prefixed_first_summary.clone(),
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": null,
+          "encrypted_content": encrypted_content_cont_1,
+          "summary": [
+            {
+              "text": "I will inspect the react app",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"cmd\":\"echo inspect-react\"}",
+          "call_id": "r2-shell",
+          "name": "exec_command",
+          "type": "function_call"
+        },
+        {
+          "content": null,
+          "encrypted_content": encrypted_content_2,
+          "summary": [
+            {
+              "text": "I will create a node app",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"cmd\":\"echo make-node\"}",
+          "call_id": "r3-shell",
+          "name": "exec_command",
+          "type": "function_call"
+        },
+        {
+          "content": [
+            {
+              "text": SUMMARIZATION_PROMPT,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ],
+      // 5: request after the second automatic compaction (under-limit continuation).
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": prefixed_second_summary.clone(),
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ],
+      // 6: third chunk of work.
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": prefixed_second_summary.clone(),
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": null,
+          "encrypted_content": encrypted_content_cont_2,
+          "summary": [
+            {
+              "text": "I will inspect the node app",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"cmd\":\"echo inspect-node\"}",
+          "call_id": "r5-shell",
+          "name": "exec_command",
+          "type": "function_call"
+        }
+      ],
+      // 7: third automatic compaction request.
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": prefixed_second_summary.clone(),
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": null,
+          "encrypted_content": encrypted_content_cont_2,
+          "summary": [
+            {
+              "text": "I will inspect the node app",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"cmd\":\"echo inspect-node\"}",
+          "call_id": "r5-shell",
+          "name": "exec_command",
+          "type": "function_call"
+        },
+        {
+          "content": null,
+          "encrypted_content": encrypted_content_3,
+          "summary": [
+            {
+              "text": "I will create a python app",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"cmd\":\"echo make-python\"}",
+          "call_id": "r6-shell",
+          "name": "exec_command",
+          "type": "function_call"
+        },
+        {
+          "content": [
+            {
+              "text": SUMMARIZATION_PROMPT,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ],
+      // 8: final request, after the third automatic compaction.
+      [
+        {
+          "content": [
+            {
+              "text": environment_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": user_message,
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        {
+          "content": [
+            {
+              "text": prefixed_third_summary.clone(),
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ]
     ]
-    ,
-    [
-        // 1: first automatic compaction request.
-      {
-        "content": [
-          {
-            "text": environment_message,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": "create an app",
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": null,
-        "encrypted_content": encrypted_content_1,
-        "summary": [
-          {
-            "text": "I will create a react app",
-            "type": "summary_text"
-          }
-        ],
-        "type": "reasoning"
-      },
-      {
-        "arguments": "{\"cmd\":\"echo make-react\"}",
-        "call_id": "r1-shell",
-        "name": "exec_command",
-        "type": "function_call"
-      },
-      {
-        "call_id": "r1-shell",
-        "output": "execution error: Io(Os { code: 2, kind: NotFound, message: \"No such file or directory\" })",
-        "type": "function_call_output"
-      },
-      {
-        "content": [
-          {
-            "text": SUMMARIZATION_PROMPT,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      }
-    ]
-    ,
-    [
-      // 2: request after first automatic compaction.
-      {
-        "content": [
-          {
-            "text": environment_message,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": "create an app",
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": prefixed_first_summary.clone(),
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      }
-    ]
-    ,
-    [
-        // 3: request for second automatic compaction.
-      {
-        "content": [
-          {
-            "text": environment_message,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": "create an app",
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": prefixed_first_summary.clone(),
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": null,
-        "encrypted_content": encrypted_content_2,
-        "summary": [
-          {
-            "text": "I will create a node app",
-            "type": "summary_text"
-          }
-        ],
-        "type": "reasoning"
-      },
-      {
-        "arguments": "{\"cmd\":\"echo make-node\"}",
-        "call_id": "r3-shell",
-        "name": "exec_command",
-        "type": "function_call"
-      },
-      {
-        "call_id": "r3-shell",
-        "output": "execution error: Io(Os { code: 2, kind: NotFound, message: \"No such file or directory\" })",
-        "type": "function_call_output"
-      },
-      {
-        "content": [
-          {
-            "text": SUMMARIZATION_PROMPT,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      }
-    ]
-    ,
-    // 4: request after second automatic compaction.
-    [
-      {
-        "content": [
-          {
-            "text": environment_message,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": "create an app",
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": prefixed_second_summary.clone(),
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      }
-    ]
-    ,
-    [
-      // 5: request for third automatic compaction.
-      {
-        "content": [
-          {
-            "text": environment_message,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": "create an app",
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": prefixed_second_summary.clone(),
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": null,
-        "encrypted_content": encrypted_content_3,
-        "summary": [
-          {
-            "text": "I will create a python app",
-            "type": "summary_text"
-          }
-        ],
-        "type": "reasoning"
-      },
-      {
-        "arguments": "{\"cmd\":\"echo make-python\"}",
-        "call_id": "r6-shell",
-        "name": "exec_command",
-        "type": "function_call"
-      },
-      {
-        "call_id": "r6-shell",
-        "output": "execution error: Io(Os { code: 2, kind: NotFound, message: \"No such file or directory\" })",
-        "type": "function_call_output"
-      },
-      {
-        "content": [
-          {
-            "text": SUMMARIZATION_PROMPT,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      }
-    ]
-    ,
-    [
-      {
-        // 6: request after third automatic compaction.
-        "content": [
-          {
-            "text": environment_message,
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": "create an app",
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      },
-      {
-        "content": [
-          {
-            "text": prefixed_third_summary.clone(),
-            "type": "input_text"
-          }
-        ],
-        "role": "user",
-        "type": "message"
-      }
-    ]
-    ]);
+        );
 
     for (i, request) in requests_payloads.iter().enumerate() {
         let body = request.body_json();
@@ -2255,8 +2399,8 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
         assert_eq!(normalize_inputs(input), normalize_inputs(expected_input));
     }
 
-    // test 3: the number of requests should be 7
-    assert_eq!(requests_payloads.len(), 7);
+    // test 3: the number of requests should be 9
+    assert_eq!(requests_payloads.len(), 9);
 }
 
 // Windows CI only: bump to 4 workers to prevent SSE/event starvation and test timeouts.
@@ -5017,6 +5161,91 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
         body_contains_text(&request_bodies[4], SUMMARIZATION_PROMPT),
         "second auto compact request should include the summarization prompt"
     );
+}
+
+/// WI-2832: when the part of the prompt that compaction cannot shrink (tool specs,
+/// instructions) is already over `model_auto_compact_token_limit`, every request after a
+/// compaction is over the limit again. Codex used to loop compaction -> one tool call ->
+/// compaction until the session was stopped (235 compactions in one turn). The turn must
+/// stop after the first ineffective compaction instead.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_compact_stops_when_compaction_cannot_get_below_limit() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+
+    let over_limit_step = || {
+        sse(vec![
+            ev_function_call(DUMMY_CALL_ID, DUMMY_FUNCTION_NAME, "{}"),
+            ev_completed_with_tokens("over-limit", /*total_tokens*/ 400),
+        ])
+    };
+    let summary_step = || {
+        sse(vec![
+            ev_assistant_message("summary", &auto_summary(AUTO_SUMMARY_TEXT)),
+            ev_completed_with_tokens("summary", /*total_tokens*/ 50),
+        ])
+    };
+    // One step, one compaction, one step. The old loop compacted again here; the sequence
+    // has no fourth response, so a further request fails the turn with a different error.
+    let request_log = mount_sse_sequence(
+        &server,
+        vec![over_limit_step(), summary_step(), over_limit_step()],
+    )
+    .await;
+
+    let model_provider = non_openai_model_provider(&server);
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            set_test_compact_prompt(config);
+            config.model_auto_compact_token_limit = Some(300);
+        })
+        .build(&server)
+        .await
+        .unwrap()
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: FUNCTION_CALL_LIMIT_MSG.into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+    let turn_error = loop {
+        match wait_for_event(&codex, |_| true).await {
+            EventMsg::Warning(WarningEvent { message }) => warnings.push(message),
+            EventMsg::Error(error) => errors.push(error.codex_error_info),
+            EventMsg::TurnComplete(event) => {
+                break event.error.and_then(|error| error.codex_error_info);
+            }
+            _ => {}
+        }
+    };
+
+    assert_eq!(turn_error, Some(CodexErrorInfo::ContextWindowExceeded));
+    assert_eq!(errors, vec![Some(CodexErrorInfo::ContextWindowExceeded)]);
+    assert!(
+        warnings.iter().any(|message| message
+            .contains("Auto-compaction could not bring the context below the limit")
+            && message.contains("400 prompt tokens against a limit of 300")),
+        "expected an ineffective-compaction warning, got {warnings:?}"
+    );
+
+    let requests = request_log.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "expected one step, one compaction and one step, then a stop"
+    );
+    assert!(body_contains_text(
+        &requests[1].body_json().to_string(),
+        SUMMARIZATION_PROMPT
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
