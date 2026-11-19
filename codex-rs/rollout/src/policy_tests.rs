@@ -118,3 +118,49 @@ fn inline_image_generation_result_is_preserved() {
         })
     );
 }
+
+fn guardian_assessment(status: codex_protocol::protocol::GuardianAssessmentStatus) -> EventMsg {
+    EventMsg::GuardianAssessment(codex_protocol::protocol::GuardianAssessmentEvent {
+        review_reason: None,
+        model_context: None,
+        id: "review-1".into(),
+        target_item_id: None,
+        plugin_id: None,
+        script_path: None,
+        turn_id: "turn-1".into(),
+        started_at_ms: 1,
+        completed_at_ms: None,
+        status,
+        risk_level: None,
+        user_authorization: None,
+        rationale: None,
+        decision_source: None,
+        action: codex_protocol::protocol::GuardianAssessmentAction::Command {
+            source: codex_protocol::protocol::GuardianCommandSource::Shell,
+            command: "true".into(),
+            cwd: codex_utils_absolute_path::AbsolutePathBuf::current_dir()
+                .expect("current dir")
+                .into(),
+        },
+    })
+}
+
+/// Fork issue #34: auto-review verdicts must be auditable from the rollout.
+#[test]
+fn guardian_assessment_verdicts_are_persisted_but_in_progress_is_not() {
+    use codex_protocol::protocol::GuardianAssessmentStatus as S;
+    for status in [S::Approved, S::Denied, S::TimedOut, S::Aborted] {
+        let event = guardian_assessment(status);
+        assert!(
+            persisted_event_msg(&event, ThreadHistoryMode::Legacy).is_some(),
+            "{status:?} must be persisted"
+        );
+    }
+    assert!(
+        persisted_event_msg(
+            &guardian_assessment(S::InProgress),
+            ThreadHistoryMode::Legacy
+        )
+        .is_none()
+    );
+}
