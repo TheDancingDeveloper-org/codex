@@ -2282,39 +2282,52 @@ async fn mid_turn_auto_compact_session_start_hooks_run_before_each_continuation(
         ]),
     )
     .await;
+    // WI-2832: the first request after a compaction must not itself be over the
+    // limit, or the turn stops instead of compacting again. This continuation is
+    // under the limit, so it runs and the next over-limit step can compact a
+    // second time.
     let first_continuation = mount_sse_once(
         &server,
         sse(vec![
             ev_response_created("resp-3"),
             ev_function_call("call-2", "test_tool", "{}"),
-            ev_completed_with_tokens("resp-3", over_limit_tokens),
+            ev_completed_with_tokens("resp-3", limit / 2),
+        ]),
+    )
+    .await;
+    let _over_limit_again = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-4"),
+            ev_function_call("call-3", "test_tool", "{}"),
+            ev_completed_with_tokens("resp-4", over_limit_tokens),
         ]),
     )
     .await;
     let _second_compact = mount_sse_once(
         &server,
         sse(vec![
-            ev_response_created("resp-4"),
+            ev_response_created("resp-5"),
             ev_assistant_message("summary-2", "second compact summary"),
-            ev_completed_with_tokens("resp-4", compacted_tokens),
+            ev_completed_with_tokens("resp-5", compacted_tokens),
         ]),
     )
     .await;
     let second_continuation = mount_sse_once(
         &server,
         sse(vec![
-            ev_response_created("resp-5"),
+            ev_response_created("resp-6"),
             ev_assistant_message("final", "finished after compaction"),
-            ev_completed_with_tokens("resp-5", compacted_tokens),
+            ev_completed_with_tokens("resp-6", compacted_tokens),
         ]),
     )
     .await;
     let next_turn = mount_sse_once(
         &server,
         sse(vec![
-            ev_response_created("resp-6"),
+            ev_response_created("resp-7"),
             ev_assistant_message("next", "finished next turn"),
-            ev_completed_with_tokens("resp-6", compacted_tokens),
+            ev_completed_with_tokens("resp-7", compacted_tokens),
         ]),
     )
     .await;
