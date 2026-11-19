@@ -688,8 +688,31 @@ pub(crate) enum MouseCapture {
     Disabled,
 }
 
+/// Process-wide veto from `tui.mouse_capture = false` or `CODEX_TUI_MOUSE_CAPTURE=0`.
+static MOUSE_CAPTURE_VETOED: AtomicBool = AtomicBool::new(false);
+
+/// Resolve the mouse-capture policy: the environment variable wins over the config value.
+pub(crate) fn mouse_capture_allowed(config: Option<bool>, env: Option<&str>) -> bool {
+    match env.map(|value| value.trim().to_ascii_lowercase()) {
+        Some(value) if matches!(value.as_str(), "0" | "false" | "off" | "no" | "never") => false,
+        Some(value) if matches!(value.as_str(), "1" | "true" | "on" | "yes" | "always") => true,
+        _ => config.unwrap_or(true),
+    }
+}
+
+pub(crate) fn configure_mouse_capture(config: Option<bool>) {
+    let env = std::env::var("CODEX_TUI_MOUSE_CAPTURE").ok();
+    MOUSE_CAPTURE_VETOED.store(
+        !mouse_capture_allowed(config, env.as_deref()),
+        Ordering::Relaxed,
+    );
+}
+
 impl MouseCapture {
     fn captures_mouse(self, owned_screen: bool) -> bool {
+        if MOUSE_CAPTURE_VETOED.load(Ordering::Relaxed) {
+            return false;
+        }
         match self {
             Self::Inherit => owned_screen,
             Self::Enabled => true,
@@ -859,8 +882,10 @@ impl Tui {
         let transition = if owned {
             self.owned_screen = true;
             if self.is_alt_screen_active() {
-                ALTERNATE_SCREEN
-                    .configure_input(self.terminal.backend_mut(), /*capture_mouse*/ true)
+                ALTERNATE_SCREEN.configure_input(
+                    self.terminal.backend_mut(),
+                    MouseCapture::Enabled.captures_mouse(self.owned_screen),
+                )
             } else {
                 self.enter_alt_screen()
             }
@@ -1648,4 +1673,19 @@ fn ensure_virtual_terminal_processing() -> Result<()> {
 #[cfg(not(windows))]
 fn ensure_virtual_terminal_processing() -> Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod mouse_capture_policy_tests {
+    use super::mouse_capture_allowed;
+
+    #[test]
+    fn config_and_env_resolve_mouse_capture() {
+        assert!(mouse_capture_allowed(None, None));
+        assert!(!mouse_capture_allowed(Some(false), None));
+        assert!(!mouse_capture_allowed(None, Some("0")));
+        assert!(!mouse_capture_allowed(Some(true), Some("off")));
+        assert!(mouse_capture_allowed(Some(false), Some("1")));
+        assert!(!mouse_capture_allowed(Some(false), Some("garbage")));
+    }
 }

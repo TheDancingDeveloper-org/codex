@@ -5537,6 +5537,10 @@
           "default": {},
           "description": "Startup tooltip availability NUX state persisted by the TUI."
         },
+        "mouse_capture": {
+          "description": "Let the TUI capture mouse events in the alternate screen. Defaults to `true`. Set `false` for browser, mobile or multi-viewer terminals whose front end owns text selection. Overridden by the `CODEX_TUI_MOUSE_CAPTURE` environment variable.",
+          "type": "boolean"
+        },
         "mouse_scroll_speed": {
           "default": null,
           "description": "Mouse wheel speed multiplier for transcript scrolling, based on one row per event. Defaults to `1.0`. Positive fractional values slow scrolling; values above `1.0` speed it up.",
