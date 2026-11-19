@@ -110,6 +110,24 @@ fn fractional_mouse_scroll_does_not_pause_following_until_a_row_moves() {
     assert!(!view.is_following());
 }
 
+#[test]
+fn wheel_scrolls_transcript_when_pointer_is_outside_its_area() {
+    let (mut view, cells) = transcript(
+        "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix",
+        /*width*/ 12,
+    );
+    assert!(view.is_following());
+    view.handle_mouse(
+        mouse(
+            MouseEventKind::ScrollUp,
+            /*column*/ 60,
+            /*row*/ 40,
+        ),
+        &cells,
+    );
+    assert!(!view.is_following());
+}
+
 fn transcript(markdown: &str, width: u16) -> (TranscriptView, Vec<Arc<dyn HistoryCell>>) {
     let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(AgentMarkdownCell::new(
         markdown.into(),

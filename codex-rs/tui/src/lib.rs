@@ -2169,6 +2169,7 @@ async fn run_ratatui_app(
         );
     }
 
+    crate::tui::configure_mouse_capture(config.tui_mouse_capture);
     // Cloud configuration and session selection can change screen policy after first paint.
     let use_alt_screen = determine_alt_screen_mode(
         cli.no_alt_screen,
