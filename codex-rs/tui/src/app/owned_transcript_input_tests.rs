@@ -357,7 +357,10 @@ async fn plan_menu_allows_transcript_selection_and_copy_but_respects_popup_bound
         scrolled |= screen(&tui) != latest;
         assert!(!app.transcript_view.has_active_interaction());
     }
-    assert!(scrolled, "wheel over the plan popup should scroll the transcript");
+    assert!(
+        scrolled,
+        "wheel over the plan popup should scroll the transcript"
+    );
     app.transcript_view.jump_to_latest();
     app.render_owned_transcript(&mut tui, size)?;
     let before = screen(&tui);

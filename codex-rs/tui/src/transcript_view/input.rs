@@ -370,8 +370,14 @@ impl TranscriptView {
                 if rounded != 0.0 && (self.pending_mouse_scroll - rounded).abs() < 1e-9 {
                     self.pending_mouse_scroll = rounded;
                 }
-                let rows = self.pending_mouse_scroll as isize;
+                let mut rows = self.pending_mouse_scroll as isize;
                 self.pending_mouse_scroll = self.pending_mouse_scroll.fract();
+                // Any upward wheel movement leaves the bottom, even before a whole row has
+                // accumulated, so streaming output cannot re-pin a reader who began scrolling up.
+                if direction < 0.0 && rows == 0 && self.is_following() {
+                    rows = -1;
+                    self.pending_mouse_scroll += 1.0;
+                }
                 if rows != 0 {
                     self.scroll(cells, rows);
                 }

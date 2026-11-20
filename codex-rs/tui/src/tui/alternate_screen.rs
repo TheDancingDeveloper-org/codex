@@ -247,7 +247,9 @@ impl super::MouseCapture {
         *self = next;
         if let Err(error) = screen.configure_input(writer, next.captures_mouse(owned)) {
             *self = Self::Inherit;
-            let _ = screen.configure_input(writer, owned);
+            // The fallback applies the same veto (tui.mouse_capture=false) as the requested policy.
+            // The fallback applies the same veto (tui.mouse_capture=false) as the requested policy.
+            let _ = screen.configure_input(writer, Self::Inherit.captures_mouse(owned));
             return Err(error);
         }
         Ok(())
