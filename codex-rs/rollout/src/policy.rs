@@ -158,10 +158,16 @@ fn persisted_event_msg(
             && event.kind != SubAgentActivityKind::Completed)
             .then_some(Cow::Borrowed(ev)),
 
+        // Auto-review verdicts are the audit trail of what was auto-approved or
+        // denied (fork issue #34). Only the terminal status is durable; the
+        // in-progress marker is transient.
+        EventMsg::GuardianAssessment(event) => (event.status
+            != codex_protocol::protocol::GuardianAssessmentStatus::InProgress)
+            .then_some(Cow::Borrowed(ev)),
+
         // Transient, non-durable events.
         EventMsg::Error(_)
         | EventMsg::ThreadQueueChanged(_)
-        | EventMsg::GuardianAssessment(_)
         | EventMsg::ExecCommandEnd(_)
         | EventMsg::ViewImageToolCall(_)
         | EventMsg::CollabAgentSpawnEnd(_)
