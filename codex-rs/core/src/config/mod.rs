@@ -857,6 +857,9 @@ pub struct Config {
     /// Mouse wheel speed multiplier for transcript scrolling; defaults to one row per event.
     pub tui_mouse_scroll_speed: Option<f64>,
 
+    /// Whether the TUI may capture the mouse in the alternate screen (`tui.mouse_capture`).
+    pub tui_mouse_capture: Option<bool>,
+
     /// Override the terminal default for copying transcript, footer, and composer selections.
     pub tui_copy_on_select: codex_config::types::CopyOnSelect,
 
@@ -4896,6 +4899,7 @@ impl Config {
                 .is_none_or(|tui| tui.fullscreen_transcript),
             tui_sidebar_width_percent: cfg.tui.as_ref().and_then(|tui| tui.sidebar_width_percent),
             tui_mouse_scroll_speed: cfg.tui.as_ref().and_then(|tui| tui.mouse_scroll_speed),
+            tui_mouse_capture: cfg.tui.as_ref().and_then(|tui| tui.mouse_capture),
             tui_copy_on_select: cfg
                 .tui
                 .as_ref()

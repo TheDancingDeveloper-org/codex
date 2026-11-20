@@ -367,6 +367,36 @@ fn failed_mouse_encoding_setup_is_cleaned_up() {
 }
 
 #[test]
+fn failed_mouse_fallback_respects_the_mouse_capture_veto() {
+    let screen = AlternateScreen::default();
+    let mut output = Vec::new();
+    enter_with_mouse_enabled(&screen, &mut output, /*capture_mouse*/ true).unwrap();
+    let mut writer = FailOnce {
+        output,
+        sequence: b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l",
+        failed: false,
+    };
+    crate::tui::configure_mouse_capture(Some(false));
+    let mut state = MouseCapture::Enabled;
+    let result = state.apply(
+        &screen,
+        &mut writer,
+        MouseCapture::Inherit,
+        /*owned*/ true,
+    );
+    crate::tui::configure_mouse_capture(None);
+    assert!(result.is_err());
+    let mut terminal = vt100::Parser::new(
+        /*rows*/ 24, /*cols*/ 80, /*scrollback_len*/ 0,
+    );
+    terminal.process(&writer.output);
+    assert_eq!(
+        terminal.screen().mouse_protocol_mode(),
+        vt100::MouseProtocolMode::None,
+    );
+}
+
+#[test]
 fn failed_mouse_cleanup_still_leaves_owned_screen_and_remains_retryable() {
     let screen = AlternateScreen::default();
     let mut output = Vec::new();

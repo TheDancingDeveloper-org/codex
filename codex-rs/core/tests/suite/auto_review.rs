@@ -12,6 +12,8 @@ use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_features::Feature;
 use codex_login::CodexAuth;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ReasoningSummary;
@@ -33,6 +35,8 @@ use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::user_input::UserInput;
+use codex_rollout::RolloutItem;
+use codex_rollout::RolloutRecorder;
 use core_test_support::TempDirExt;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
@@ -288,6 +292,276 @@ async fn require_escalated_bypasses_extension_approval_and_runs_guardian() -> Re
         })
         .context("expected full Guardian review for require_escalated")?;
     assert!(guardian_request.body_contains_text(justification));
+    assert!(
+        responses
+            .function_call_output_text(call_id)
+            .context("expected exec_command output")?
+            .contains("not authorized")
+    );
+
+    Ok(())
+}
+
+/// Fork issue #34 (WI-4410): under `approvals_reviewer=auto_review` a blocked escalation is
+/// decided by the reviewer and never raised as a user approval prompt. The client-visible shape
+/// Vogt must watch is a `GuardianAssessment` event: `InProgress`, then `Denied`. The terminal
+/// verdict is also persisted in the rollout, so the decision is auditable after the turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_review_denial_surfaces_as_guardian_assessment_and_is_persisted() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_wine_exec!(Ok(()), "exec_command requires host-native paths");
+
+    let server = MockServer::start().await;
+    let call_id = "auto-review-denied-command";
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-parent-1"),
+                ev_function_call(
+                    call_id,
+                    "exec_command",
+                    &json!({
+                        "cmd": "pwd",
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "run outside the sandbox after a blocked attempt",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-parent-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-guardian"),
+                ev_assistant_message(
+                    "msg-guardian",
+                    &json!({
+                        "risk_level": "high",
+                        "user_authorization": "low",
+                        "outcome": "deny",
+                        "rationale": "The unsandboxed command is not authorized.",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-guardian"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-parent-2"),
+                ev_assistant_message("msg-parent", "done"),
+                ev_completed("resp-parent-2"),
+            ]),
+        ],
+    )
+    .await;
+
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.approval_review_contributor(Arc::new(EscalationApprovingReviewContributor));
+    let mut builder = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_config(|config| {
+            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config
+                .permissions
+                .set_permission_profile(PermissionProfile::read_only())
+                .expect("set read-only permission profile");
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "retry the blocked command outside the sandbox".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+
+    let mut assessments = Vec::new();
+    loop {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::ExecApprovalRequest(event) => {
+                panic!("auto_review must not raise a user approval prompt: {event:?}")
+            }
+            EventMsg::GuardianAssessment(event) => assessments.push(event),
+            EventMsg::TurnComplete(_) => break,
+            _ => {}
+        }
+    }
+
+    // The client watches the in-progress review, then the terminal Denied verdict.
+    let statuses = assessments
+        .iter()
+        .map(|event| event.status)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        statuses,
+        vec![
+            codex_protocol::protocol::GuardianAssessmentStatus::InProgress,
+            codex_protocol::protocol::GuardianAssessmentStatus::Denied,
+        ]
+    );
+    assert_eq!(assessments[0].id, assessments[1].id);
+    // The reviewed action is the shell-wrapped command, so match the command text, not equality.
+    let reviewed_action = format!("{:?}", assessments[1].action);
+    assert!(reviewed_action.contains("pwd"), "{reviewed_action}");
+    assert!(
+        responses
+            .function_call_output_text(call_id)
+            .context("expected exec_command output")?
+            .contains("not authorized")
+    );
+
+    // The terminal verdict is durable; the in-progress marker is not (fork #34).
+    test.codex.shutdown_and_wait().await?;
+    let rollout_path = test.codex.rollout_path().context("local rollout path")?;
+    let (items, _, parse_errors) = RolloutRecorder::load_rollout_items(&rollout_path).await?;
+    let persisted = items
+        .iter()
+        .filter_map(|item| match item {
+            RolloutItem::EventMsg(EventMsg::GuardianAssessment(event)) => Some(event.status),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        (parse_errors, persisted),
+        (
+            0,
+            vec![codex_protocol::protocol::GuardianAssessmentStatus::Denied]
+        )
+    );
+
+    Ok(())
+}
+
+/// Fork issue #34 item (1): `approvals_reviewer=auto_review` works with a custom, non-OpenAI
+/// model provider. The default `openai` provider points at `default_server`, which must receive
+/// nothing, while the custom `litellm` provider serves the parent turn and the Guardian review.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_review_routes_reviewer_to_custom_provider() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_wine_exec!(Ok(()), "exec_command requires host-native paths");
+
+    let default_server = MockServer::start().await;
+    let custom_server = MockServer::start().await;
+    let call_id = "custom-provider-denied-command";
+    let responses = mount_sse_sequence(
+        &custom_server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-parent-1"),
+                ev_function_call(
+                    call_id,
+                    "exec_command",
+                    &json!({
+                        "cmd": "pwd",
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "run outside the sandbox after a blocked attempt",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-parent-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-guardian"),
+                ev_assistant_message(
+                    "msg-guardian",
+                    &json!({
+                        "risk_level": "high",
+                        "user_authorization": "low",
+                        "outcome": "deny",
+                        "rationale": "The unsandboxed command is not authorized.",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-guardian"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-parent-2"),
+                ev_assistant_message("msg-parent", "done"),
+                ev_completed("resp-parent-2"),
+            ]),
+        ],
+    )
+    .await;
+
+    let custom_base_url = format!("{}/v1", custom_server.uri());
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.approval_review_contributor(Arc::new(EscalationApprovingReviewContributor));
+    let mut builder = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_config(move |config| {
+            config.model_provider_id = "litellm".to_string();
+            config.model_provider = ModelProviderInfo {
+                name: "LiteLLM".into(),
+                base_url: Some(custom_base_url),
+                model_catalog_url: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                auth: None,
+                gateway_oauth: None,
+                aws: None,
+                wire_api: WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: Some(0),
+                stream_max_retries: Some(0),
+                stream_idle_timeout_ms: Some(5_000),
+                websocket_connect_timeout_ms: None,
+                requires_openai_auth: false,
+                supports_websockets: false,
+                supports_standalone_web_search: false,
+                capabilities: None,
+                project_id: None,
+                location: None,
+                credential_file: None,
+                include_internal_metadata: false,
+            };
+            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config
+                .permissions
+                .set_permission_profile(PermissionProfile::read_only())
+                .expect("set read-only permission profile");
+        });
+    let test = builder.build_with_auto_env(&default_server).await?;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "retry the blocked command outside the sandbox".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+
+    loop {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::ExecApprovalRequest(event) => {
+                panic!("auto_review must not raise a user approval prompt: {event:?}")
+            }
+            EventMsg::TurnComplete(_) => break,
+            _ => {}
+        }
+    }
+
+    // Nothing reached the default provider's server.
+    let default_responses = default_server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .count();
+    assert_eq!(default_responses, 0);
+
+    // The parent turn and the Guardian review both went to the custom provider.
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 3);
+    let guardian_request = requests
+        .iter()
+        .find(|request| {
+            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
+        })
+        .context("expected Guardian review on the custom provider")?;
+    assert!(guardian_request.body_contains_text("run outside the sandbox"));
+
+    // The reviewer's Deny verdict is applied to the command.
     assert!(
         responses
             .function_call_output_text(call_id)

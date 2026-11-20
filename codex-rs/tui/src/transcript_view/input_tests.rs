@@ -92,8 +92,8 @@ fn decimal_mouse_scroll_speeds_preserve_whole_rows() {
 }
 
 #[test]
-fn fractional_mouse_scroll_does_not_pause_following_until_a_row_moves() {
-    let (mut view, cells) = transcript(
+fn upward_fractional_wheel_unpins_before_a_row_moves_and_streaming_cannot_repin() {
+    let (mut view, mut cells) = transcript(
         "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix",
         /*width*/ 12,
     );
@@ -102,9 +102,49 @@ fn fractional_mouse_scroll_does_not_pause_following_until_a_row_moves() {
         mouse(MouseEventKind::ScrollUp, /*column*/ 4, /*row*/ 1),
         &cells,
     );
+    assert!(!view.is_following());
+    cells.push(Arc::new(AgentMarkdownCell::new(
+        "seven\n\neight".into(),
+        std::path::Path::new("/"),
+    )));
+    let area = Rect::new(
+        /*x*/ 2, /*y*/ 1, /*width*/ 12, /*height*/ 8,
+    );
+    view.render(area, &mut Buffer::empty(area), &cells);
+    assert!(!view.is_following());
+}
+
+#[test]
+fn downward_fractional_wheel_does_not_unpin_until_a_row_moves() {
+    let (mut view, cells) = transcript(
+        "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix",
+        /*width*/ 12,
+    );
+    view.mouse_scroll_speed = 0.5;
+    view.handle_mouse(
+        mouse(
+            MouseEventKind::ScrollDown,
+            /*column*/ 4,
+            /*row*/ 1,
+        ),
+        &cells,
+    );
+    assert!(view.is_following());
+}
+
+#[test]
+fn wheel_scrolls_transcript_when_pointer_is_outside_its_area() {
+    let (mut view, cells) = transcript(
+        "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix",
+        /*width*/ 12,
+    );
     assert!(view.is_following());
     view.handle_mouse(
-        mouse(MouseEventKind::ScrollUp, /*column*/ 4, /*row*/ 1),
+        mouse(
+            MouseEventKind::ScrollUp,
+            /*column*/ 60,
+            /*row*/ 40,
+        ),
         &cells,
     );
     assert!(!view.is_following());

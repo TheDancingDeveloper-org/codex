@@ -4940,3 +4940,54 @@ async fn async_compaction_config() {
         assert_eq!(actual, expected, "{settings}");
     }
 }
+
+/// Fork issue #39: a session picks its provider and context limits with `-c`
+/// overrides, without touching the global default in config.toml.
+#[tokio::test]
+async fn cli_overrides_select_session_provider_and_context_limits() {
+    let tmp = tempdir().expect("tempdir");
+    std::fs::write(
+        tmp.path().join(CONFIG_TOML_FILE),
+        r#"
+model_provider = "global"
+model_context_window = 850000
+model_auto_compact_token_limit = 800000
+
+[model_providers.global]
+name = "global"
+base_url = "http://localhost:1/v1"
+
+[model_providers.session]
+name = "session"
+base_url = "http://localhost:2/v1"
+"#,
+    )
+    .expect("write config");
+
+    let config = ConfigBuilder::default()
+        .codex_home(tmp.path().to_path_buf())
+        .fallback_cwd(Some(tmp.path().to_path_buf()))
+        .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
+        .cli_overrides(vec![
+            (
+                "model_provider".to_string(),
+                TomlValue::String("session".to_string()),
+            ),
+            (
+                "model_context_window".to_string(),
+                TomlValue::Integer(128000),
+            ),
+            (
+                "model_auto_compact_token_limit".to_string(),
+                TomlValue::Integer(100000),
+            ),
+        ])
+        .build()
+        .await
+        .expect("config with provider override");
+
+    assert_eq!(config.model_provider_id, "session");
+    assert_eq!(config.model_provider.name, "session");
+    assert_eq!(config.model_context_window, Some(128000));
+    assert_eq!(config.model_auto_compact_token_limit, Some(100000));
+}

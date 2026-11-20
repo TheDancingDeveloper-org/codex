@@ -342,7 +342,10 @@ async fn plan_menu_allows_transcript_selection_and_copy_but_respects_popup_bound
         }
     }
     let bottom = app.render_owned_transcript(&mut tui, size)?;
-    let before = screen(&tui);
+    let latest = screen(&tui);
+    // Wheel scrolls the transcript from anywhere on screen, including over the plan popup
+    // (#43); the popup still owns clicks and drags, checked below.
+    let mut scrolled = false;
     for (kind, column, row) in [
         (MouseEventKind::ScrollUp, 1, bottom.y),
         (MouseEventKind::ScrollDown, 1, bottom.y),
@@ -351,9 +354,17 @@ async fn plan_menu_allows_transcript_selection_and_copy_but_respects_popup_bound
         app.handle_tui_event(&mut tui, &mut server, pointer_event(kind, column, row))
             .await?;
         app.render_owned_transcript(&mut tui, size)?;
-        assert_eq!(screen(&tui), before);
+        scrolled |= screen(&tui) != latest;
         assert!(!app.transcript_view.has_active_interaction());
     }
+    assert!(
+        scrolled,
+        "wheel over the plan popup should scroll the transcript"
+    );
+    app.transcript_view.jump_to_latest();
+    app.render_owned_transcript(&mut tui, size)?;
+    let before = screen(&tui);
+    assert_eq!(before, latest);
     let (plan_row, plan_column) = before
         .lines()
         .enumerate()

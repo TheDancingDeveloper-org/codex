@@ -953,6 +953,11 @@ pub struct Tui {
     #[schemars(schema_with = "crate::tui_mouse_scroll::schema")]
     pub mouse_scroll_speed: Option<f64>,
 
+    /// Let the TUI capture mouse events in the alternate screen. Defaults to `true`.
+    /// Set `false` for browser, mobile or multi-viewer terminals whose front end owns text
+    /// selection. Overridden by the `CODEX_TUI_MOUSE_CAPTURE` environment variable.
+    pub mouse_capture: Option<bool>,
+
     /// Copy selected transcript, footer, or composer text when the mouse button is released.
     /// Defaults to `auto`: enabled except in direct terminals known to forward their native
     /// copy shortcut (Ghostty 1.2+, Kitty on macOS, Windows Terminal, and VS Code on Windows).
