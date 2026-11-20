@@ -337,7 +337,13 @@ impl TranscriptView {
             .selection
             .as_ref()
             .is_some_and(|selection| selection.dragging);
-        if !inside && !dragging {
+        // Wheel scrolling applies anywhere on screen: front ends that synthesize wheel reports
+        // (browser or mobile terminals) cannot be relied on to aim them at the transcript.
+        let wheel = matches!(
+            event.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        );
+        if !inside && !dragging && !wheel {
             return None;
         }
         // Wheel navigation supersedes the last drag position. A real drag event can resume it.
