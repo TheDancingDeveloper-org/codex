@@ -332,3 +332,9 @@ test(suite::approvals::spawned_subagent_execpolicy_amendment_propagates_to_paren
 # It passes 30/30 locally (RUST_MIN_STACK=8 MiB) and the cause is not found (WI-4137).
 # Reverse once it is fixed.
 test(app::config_panel::tests::notification_test_delay_rejects_cancelled_and_rescheduled_timers) # flaky on nodef-gha-public-rust, fork-ci run 43161252227, cause unknown (WI-4137)
+
+# Timed out at 60s on both tries in the fork/main merge queue (batch PR #48, job 136703791393,
+# nodef runner; timed out on both tries) but passed on the PR run of the same head, and 20/20 locally in ~0.5s each
+# (WI-4505). Cause not found.
+# Reverse once it is fixed.
+test(auth_storage_originator::concurrent_connections_export_their_own_storage_originator) # flaky in merge queue job 136703791393, WI-4505
