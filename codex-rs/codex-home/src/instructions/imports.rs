@@ -357,7 +357,7 @@ impl Expander {
     }
 }
 
-/// A line that is exactly `@path`, with the path characters Klaudia accepts.
+/// A line that is exactly `@path`, with the path characters accepted in imports.
 fn line_only_import(trimmed: &str) -> Option<&str> {
     let reference = trimmed.strip_prefix('@')?;
     if reference.is_empty()
